@@ -82,6 +82,10 @@ impl Metrics {
             .set(lag as i64);
     }
 
+    pub fn registry(&self) -> &Registry {
+        &self.registry
+    }
+
     pub fn encode(&self) -> Result<String, prometheus::Error> {
         let mut buffer = Vec::new();
         TextEncoder::new().encode(&self.registry.gather(), &mut buffer)?;
