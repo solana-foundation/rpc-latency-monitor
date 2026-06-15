@@ -7,6 +7,7 @@ use serde::Deserialize;
 use serde_json::Value;
 
 const LAND_LATENCY_BUCKETS: &[f64] = &[0.1, 0.25, 0.5, 1.0, 2.0, 5.0, 10.0, 20.0, 30.0, 60.0];
+const LAND_SLOTS_BUCKETS: &[f64] = &[1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 64.0, 128.0];
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct SenderConfig {
@@ -55,7 +56,7 @@ impl BudgetGuard {
             }
             match self.spent.compare_exchange_weak(
                 current,
-                current + lamports,
+                current.saturating_add(lamports),
                 Ordering::Relaxed,
                 Ordering::Relaxed,
             ) {
@@ -92,30 +93,32 @@ pub fn classify_status(response: &Value) -> LandingStatus {
     if status.is_null() {
         return LandingStatus::Pending;
     }
-    let has_error = status.get("err").is_some_and(|err| !err.is_null());
-    if has_error {
-        return LandingStatus::Failed;
-    }
     let confirmation = status
         .get("confirmationStatus")
         .and_then(Value::as_str)
         .unwrap_or("");
-    if confirmation == "confirmed" || confirmation == "finalized" {
-        let slot = status
-            .get("slot")
-            .and_then(Value::as_u64)
-            .unwrap_or_default();
-        LandingStatus::Landed { slot }
-    } else {
-        LandingStatus::Pending
+    // Only "confirmed"/"finalized" are terminal. A "processed" entry (even with
+    // an err) can be rolled back and the tx may still land, so treat it as pending.
+    if confirmation != "confirmed" && confirmation != "finalized" {
+        return LandingStatus::Pending;
     }
+    if status.get("err").is_some_and(|err| !err.is_null()) {
+        return LandingStatus::Failed;
+    }
+    let slot = status
+        .get("slot")
+        .and_then(Value::as_u64)
+        .unwrap_or_default();
+    LandingStatus::Landed { slot }
 }
 
 #[derive(Clone)]
 pub struct SenderMetrics {
     land_latency: HistogramVec,
+    land_slots: HistogramVec,
     landed: IntCounterVec,
     dropped: IntCounterVec,
+    failed: IntCounterVec,
     spend: IntCounterVec,
     budget_remaining: IntGaugeVec,
 }
@@ -130,6 +133,11 @@ impl SenderMetrics {
             .buckets(LAND_LATENCY_BUCKETS.to_vec()),
             &["provider", "outcome"],
         )?;
+        let land_slots = HistogramVec::new(
+            HistogramOpts::new("sender_land_slots", "Slots elapsed from submit to landing")
+                .buckets(LAND_SLOTS_BUCKETS.to_vec()),
+            &["provider"],
+        )?;
         let landed = IntCounterVec::new(
             Opts::new("sender_landed_total", "Probes that landed on-chain"),
             &["provider"],
@@ -138,6 +146,13 @@ impl SenderMetrics {
             Opts::new(
                 "sender_dropped_total",
                 "Probes that never landed before timeout",
+            ),
+            &["provider"],
+        )?;
+        let failed = IntCounterVec::new(
+            Opts::new(
+                "sender_failed_total",
+                "Probes that landed with an on-chain error",
             ),
             &["provider"],
         )?;
@@ -157,24 +172,31 @@ impl SenderMetrics {
         )?;
 
         registry.register(Box::new(land_latency.clone()))?;
+        registry.register(Box::new(land_slots.clone()))?;
         registry.register(Box::new(landed.clone()))?;
         registry.register(Box::new(dropped.clone()))?;
+        registry.register(Box::new(failed.clone()))?;
         registry.register(Box::new(spend.clone()))?;
         registry.register(Box::new(budget_remaining.clone()))?;
 
         Ok(Self {
             land_latency,
+            land_slots,
             landed,
             dropped,
+            failed,
             spend,
             budget_remaining,
         })
     }
 
-    pub fn record_landed(&self, provider: &str, latency: Duration) {
+    pub fn record_landed(&self, provider: &str, latency: Duration, slots: u64) {
         self.land_latency
             .with_label_values(&[provider, "landed"])
             .observe(latency.as_secs_f64());
+        self.land_slots
+            .with_label_values(&[provider])
+            .observe(slots as f64);
         self.landed.with_label_values(&[provider]).inc();
     }
 
@@ -185,6 +207,13 @@ impl SenderMetrics {
         self.dropped.with_label_values(&[provider]).inc();
     }
 
+    pub fn record_failed(&self, provider: &str, latency: Duration) {
+        self.land_latency
+            .with_label_values(&[provider, "failed"])
+            .observe(latency.as_secs_f64());
+        self.failed.with_label_values(&[provider]).inc();
+    }
+
     pub fn add_spend(&self, provider: &str, lamports: u64) {
         self.spend.with_label_values(&[provider]).inc_by(lamports);
     }
@@ -192,7 +221,7 @@ impl SenderMetrics {
     pub fn set_budget_remaining(&self, provider: &str, lamports: u64) {
         self.budget_remaining
             .with_label_values(&[provider])
-            .set(lamports as i64);
+            .set(lamports.min(i64::MAX as u64) as i64);
     }
 }
 
@@ -223,6 +252,14 @@ mod tests {
             classify_status(&json!({ "result": { "value": [] } })),
             LandingStatus::Pending
         );
+    }
+
+    #[test]
+    fn classify_pending_for_processed_level_error() {
+        let response = json!({
+            "result": { "value": [{ "slot": 9, "confirmationStatus": "processed", "err": { "InstructionError": [] } }] }
+        });
+        assert_eq!(classify_status(&response), LandingStatus::Pending);
     }
 
     #[test]
