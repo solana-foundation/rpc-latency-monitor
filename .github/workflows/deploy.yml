@@ -8,11 +8,11 @@ on:
   workflow_dispatch:
     inputs:
       target:
-        description: "What to deploy (auto = detect from changed files)"
+        description: "What to deploy"
         required: true
         type: choice
-        default: auto
-        options: [auto, all, grafana, gcp]
+        default: all
+        options: [all, grafana, gcp]
 
 permissions:
   contents: read
@@ -23,49 +23,26 @@ concurrency:
 
 jobs:
   detect:
-    name: detect changed targets
+    name: resolve targets
     if: >
       github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
     runs-on: ubuntu-latest
     outputs:
-      grafana: ${{ steps.tiers.outputs.grafana }}
-      gcp: ${{ steps.tiers.outputs.gcp }}
+      grafana: ${{ steps.t.outputs.grafana }}
+      gcp: ${{ steps.t.outputs.gcp }}
     steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
-          fetch-depth: 0
-
-      - name: Detect changed paths
-        id: filter
+      - name: Resolve target
+        id: t
         run: |
-          set -e
-          BASE=$(git rev-parse HEAD~1)
-          REF=${{ github.event.workflow_run.head_sha || github.sha }}
-          CHANGED=$(git diff --name-only "$BASE" "$REF")
-          echo "Changed files:"; echo "$CHANGED" | sed 's/^/  /'
-          match() { echo "$CHANGED" | grep -qE "$1"; }
-
-          GRAF=false
-          GCP=false
-          match '^grafana/' && GRAF=true
-          match '^src/|^Cargo\.(toml|lock)$|^deploy/|^config\.example\.yaml$' && GCP=true
-          echo "grafana=$GRAF" >> "$GITHUB_OUTPUT"
-          echo "gcp=$GCP" >> "$GITHUB_OUTPUT"
-
-      - name: Resolve target override
-        id: tiers
-        run: |
-          mode="${{ inputs.target || 'auto' }}"
+          # workflow_run has no input -> deploy everything. Both targets are
+          # idempotent (dashboard upsert, terraform apply), so deploying both
+          # on every main CI success is safe and avoids fragile path detection.
+          mode="${{ inputs.target || 'all' }}"
           case "$mode" in
             grafana) gr=true;  gcp=false ;;
             gcp)     gr=false; gcp=true  ;;
-            all)     gr=true;  gcp=true  ;;
-            auto|*)
-              gr="${{ steps.filter.outputs.grafana }}"
-              gcp="${{ steps.filter.outputs.gcp }}"
-              ;;
+            all|*)   gr=true;  gcp=true  ;;
           esac
           echo "grafana=$gr" >> "$GITHUB_OUTPUT"
           echo "gcp=$gcp" >> "$GITHUB_OUTPUT"
@@ -84,9 +61,12 @@ jobs:
           DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN }}
         run: |
           set -euo pipefail
-          export $(doppler secrets download --no-file --format env \
-            --project rpc-latency-monitor --config prd | xargs)
+          get() { doppler secrets get "$1" --plain --project rpc-latency-monitor --config prd; }
+          # Fetch only the dashboard-push creds, and mask the token before use.
+          GRAFANA_API_TOKEN="$(get GRAFANA_API_TOKEN)"
           echo "::add-mask::$GRAFANA_API_TOKEN"
+          GRAFANA_API_URL="$(get GRAFANA_API_URL)"
+          GRAFANA_FOLDER_UID="$(get GRAFANA_FOLDER_UID)"
           payload=$(jq -n --slurpfile d grafana/dashboard.json --arg folder "$GRAFANA_FOLDER_UID" \
             '{dashboard: ($d[0] + {id: null}), folderUid: $folder, overwrite: true}')
           curl -sS --fail-with-body -X POST "$GRAFANA_API_URL/api/dashboards/db" \
@@ -109,7 +89,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: google-github-actions/auth@v2
         with:
-          credentials_json: ${{ secrets.GCP_SA_KEY }}
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
       - uses: google-github-actions/setup-gcloud@v2
 
       - name: Build and push image
@@ -119,7 +100,7 @@ jobs:
             --substitutions=_IMAGE="$MONITOR_IMAGE"
 
       - uses: hashicorp/setup-terraform@v3
-      - name: Terraform apply
+      - name: Terraform plan & apply
         working-directory: deploy/gcp/terraform
         env:
           TF_VAR_project_id: ${{ vars.GCP_PROJECT_ID }}
@@ -128,4 +109,5 @@ jobs:
         run: |
           terraform init -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" \
             -backend-config="prefix=rpc-latency-monitor"
-          terraform apply -auto-approve
+          terraform plan -out=tf.plan
+          terraform apply tf.plan

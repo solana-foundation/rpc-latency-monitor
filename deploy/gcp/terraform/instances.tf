@@ -3,7 +3,7 @@ resource "google_compute_instance" "monitor" {
   name         = "rpc-latency-monitor-${each.key}"
   machine_type = var.machine_type
   zone         = each.value
-  depends_on   = [google_project_service.compute]
+  depends_on   = [google_project_service.compute, google_project_iam_member.monitor_ar_reader]
 
   boot_disk {
     initialize_params {
@@ -18,6 +18,7 @@ resource "google_compute_instance" "monitor" {
   }
 
   service_account {
+    email  = google_service_account.monitor.email
     scopes = ["cloud-platform"]
   }
 
