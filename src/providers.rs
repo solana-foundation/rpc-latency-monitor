@@ -36,7 +36,9 @@ pub enum ResolveError {
     Unterminated { provider: String },
 }
 
-pub fn resolve_endpoints(providers: &[ProviderConfig]) -> Result<Vec<ProviderEndpoint>, ResolveError> {
+pub fn resolve_endpoints(
+    providers: &[ProviderConfig],
+) -> Result<Vec<ProviderEndpoint>, ResolveError> {
     providers
         .iter()
         .map(|p| resolve_one(p, &|name| std::env::var(name).ok()))

@@ -40,7 +40,9 @@ pub async fn poll_reference_endpoint(
     let mut ticker = tokio::time::interval(interval);
     loop {
         ticker.tick().await;
-        let Some(result) = client.call(&url, RpcMethod::GetSlot, &RequestContext::default()).await
+        let Some(result) = client
+            .call(&url, RpcMethod::GetSlot, &RequestContext::default())
+            .await
         else {
             continue;
         };

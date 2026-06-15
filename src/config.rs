@@ -153,7 +153,9 @@ mod tests {
              providers: [{ name: dup, url: \"http://a\" }, { name: dup, url: \"http://b\" }]\n\
              checks: [{ method: get_slot, interval: 2s }]\n",
         );
-        let err = config.validate().expect_err("duplicate names must be rejected");
+        let err = config
+            .validate()
+            .expect_err("duplicate names must be rejected");
         assert!(err.to_string().contains("duplicate provider name"));
     }
 

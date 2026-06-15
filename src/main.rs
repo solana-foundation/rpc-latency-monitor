@@ -61,7 +61,9 @@ fn spawn_reference_poller(config: &Config, reference: &ReferenceSlot) -> anyhow:
     let client = RpcClient::new(config.request_timeout)?;
     let interval = config.reference_slot.poll_interval;
     let reference = reference.clone();
-    tokio::spawn(poll_reference_endpoint(client, endpoint, interval, reference));
+    tokio::spawn(poll_reference_endpoint(
+        client, endpoint, interval, reference,
+    ));
     Ok(())
 }
 

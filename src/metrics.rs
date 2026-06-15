@@ -31,7 +31,10 @@ impl Metrics {
             &["provider", "method", "status"],
         )?;
         let slot_lag = IntGaugeVec::new(
-            Opts::new("rpc_slot_lag", "Slots a provider trails the observed chain tip"),
+            Opts::new(
+                "rpc_slot_lag",
+                "Slots a provider trails the observed chain tip",
+            ),
             &["provider", "method"],
         )?;
         let requests = IntCounterVec::new(

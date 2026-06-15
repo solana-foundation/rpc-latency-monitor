@@ -78,7 +78,9 @@ pub struct RpcClient {
 
 impl RpcClient {
     pub fn new(request_timeout: Duration) -> reqwest::Result<Self> {
-        let http = reqwest::Client::builder().timeout(request_timeout).build()?;
+        let http = reqwest::Client::builder()
+            .timeout(request_timeout)
+            .build()?;
         Ok(Self { http })
     }
 
@@ -218,7 +220,10 @@ mod tests {
             &body(r#"{"jsonrpc":"2.0","error":{"code":-32005,"message":"unhealthy"},"id":1}"#),
             RpcMethod::GetHealth,
         );
-        assert_eq!(parsed.status, CallStatus::Error(ErrorKind::RpcError(-32005)));
+        assert_eq!(
+            parsed.status,
+            CallStatus::Error(ErrorKind::RpcError(-32005))
+        );
         assert_eq!(parsed.observed_slot, None);
     }
 
