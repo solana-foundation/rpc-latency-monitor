@@ -134,30 +134,6 @@
       ]
     },
     {
-      "id": 6,
-      "type": "stat",
-      "title": "Provider up",
-      "datasource": { "type": "prometheus", "uid": "${datasource}" },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
-      "fieldConfig": {
-        "defaults": {
-          "mappings": [
-            { "type": "value", "options": { "0": { "text": "DOWN", "color": "red" } } },
-            { "type": "value", "options": { "1": { "text": "UP", "color": "green" } } }
-          ]
-        },
-        "overrides": []
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "datasource": { "type": "prometheus", "uid": "${datasource}" },
-          "expr": "rpc_up{region=~\"$region\", provider=~\"$provider\"}",
-          "legendFormat": "{{provider}}"
-        }
-      ]
-    },
-    {
       "id": 7,
       "type": "timeseries",
       "title": "Win % by provider — all regions ($method)",
