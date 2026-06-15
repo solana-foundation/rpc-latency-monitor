@@ -1,0 +1,43 @@
+[package]
+name = "rpc-latency-monitor"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "Neutral, read-only latency monitor for Solana RPC providers"
+repository = "https://github.com/solana-foundation/rpc-latency-monitor"
+
+[dependencies]
+# Async runtime
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "time", "sync", "net"] }
+
+# HTTP: outbound RPC client + inbound metrics/health server
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"] }
+axum = "0.8"
+
+# Serialization / config. YAML parsing is provided by figment's `yaml` feature,
+# so we don't depend on the (now-deprecated) serde_yaml crate directly.
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+figment = { version = "0.10", features = ["yaml", "env"] }
+humantime-serde = "1"
+
+# Metrics
+prometheus = "0.14"
+
+# Observability
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# Errors / utils
+anyhow = "1"
+thiserror = "2"
+rand = "0.10"
+clap = { version = "4", features = ["derive", "env"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync", "test-util"] }
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1

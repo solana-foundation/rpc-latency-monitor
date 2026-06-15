@@ -1,0 +1,18 @@
+prometheus.scrape "rpc_latency_monitor" {
+  targets = [
+    { "__address__" = "127.0.0.1:9464", "job" = "rpc-latency-monitor" },
+  ]
+  scrape_interval = "15s"
+  forward_to      = [prometheus.remote_write.grafana_cloud.receiver]
+}
+
+prometheus.remote_write "grafana_cloud" {
+  endpoint {
+    url = sys.env("GRAFANA_CLOUD_PROM_URL")
+
+    basic_auth {
+      username = sys.env("GRAFANA_CLOUD_PROM_USER")
+      password = sys.env("GRAFANA_CLOUD_PROM_TOKEN")
+    }
+  }
+}

@@ -1,0 +1,26 @@
+# Rust
+/target
+**/*.rs.bk
+Cargo.lock.orig
+
+# Local config & secrets — never commit real endpoints/keys
+/config.yaml
+/config.*.yaml
+!/config.example.yaml
+.env
+.env.*
+!.env.example
+
+# Terraform
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+crash.log
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
