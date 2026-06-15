@@ -6,6 +6,9 @@ terraform {
       version = "~> 5.0"
     }
   }
+  # Remote state for CI. Local runs: `terraform init -backend=false`.
+  # CI supplies bucket/prefix via -backend-config.
+  backend "gcs" {}
 }
 
 provider "google" {

@@ -17,6 +17,10 @@ resource "google_compute_instance" "monitor" {
     access_config {}
   }
 
+  service_account {
+    scopes = ["cloud-platform"]
+  }
+
   metadata = {
     monitor-region = each.key
     monitor-image  = var.monitor_image
