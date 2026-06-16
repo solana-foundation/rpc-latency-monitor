@@ -6,14 +6,25 @@
   "tags": ["solana", "sender", "landing"],
   "time": { "from": "now-30m", "to": "now" },
   "refresh": "1m",
-  "templating": { "list": [] },
+  "templating": {
+    "list": [
+      {
+        "name": "provider",
+        "type": "custom",
+        "query": "0slot,astralane,blockrazor,bloxroute,helius,jito,stellium,temporal,temporal_private",
+        "includeAll": true,
+        "multi": true,
+        "current": { "text": "All", "value": "$__all" }
+      }
+    ]
+  },
   "panels": [
     {
       "id": 1,
       "type": "table",
-      "title": "Provider economics — last 30m (on-chain, via geyser)",
+      "title": "Provider economics (on-chain, via geyser)",
       "datasource": { "type": "grafana-clickhouse-datasource", "uid": "ffpadt3v6cpvkc" },
-      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 0 },
+      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 0 },
       "fieldConfig": { "defaults": {}, "overrides": [] },
       "targets": [
         {
@@ -22,18 +33,17 @@
           "editorType": "sql",
           "format": 1,
           "queryType": "table",
-          "rawSql": "SELECT ta.relayer AS provider, count() AS transactions, round(sum(gt.fee_sol), 4) AS total_fees_sol, round(avg(gt.fee_sol), 7) AS avg_fee_sol FROM default.geyser_transactions gt ARRAY JOIN arrayConcat(gt.static_unsigned_writable_accounts, gt.loaded_writable_accounts) AS acct INNER JOIN default.tip_accounts ta ON ta.tip_account = acct WHERE gt.is_vote = 0 AND gt.ingested_at > now() - INTERVAL 30 MINUTE GROUP BY provider ORDER BY transactions DESC"
+          "rawSql": "SELECT ta.relayer AS provider, count() AS transactions, round(sum(gt.fee_sol), 4) AS total_fees_sol, round(avg(gt.fee_sol), 7) AS avg_fee_sol FROM default.geyser_transactions gt ARRAY JOIN arrayConcat(gt.static_unsigned_writable_accounts, gt.loaded_writable_accounts) AS acct INNER JOIN default.tip_accounts ta ON ta.tip_account = acct WHERE gt.is_vote = 0 AND $__timeFilter(gt.ingested_at) AND ta.relayer IN (${provider:singlequote}) GROUP BY provider ORDER BY transactions DESC"
         }
       ]
     },
     {
       "id": 2,
-      "type": "barchart",
-      "title": "Transactions by provider — last 30m",
+      "type": "timeseries",
+      "title": "Transactions over time by provider",
       "datasource": { "type": "grafana-clickhouse-datasource", "uid": "ffpadt3v6cpvkc" },
-      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 10 },
-      "fieldConfig": { "defaults": {}, "overrides": [] },
-      "options": { "orientation": "horizontal", "xField": "provider" },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 9 },
+      "fieldConfig": { "defaults": { "custom": { "drawStyle": "line", "fillOpacity": 10 } }, "overrides": [] },
       "targets": [
         {
           "refId": "A",
@@ -41,17 +51,17 @@
           "editorType": "sql",
           "format": 1,
           "queryType": "table",
-          "rawSql": "SELECT ta.relayer AS provider, count() AS transactions FROM default.geyser_transactions gt ARRAY JOIN arrayConcat(gt.static_unsigned_writable_accounts, gt.loaded_writable_accounts) AS acct INNER JOIN default.tip_accounts ta ON ta.tip_account = acct WHERE gt.is_vote = 0 AND gt.ingested_at > now() - INTERVAL 30 MINUTE GROUP BY provider ORDER BY transactions DESC"
+          "rawSql": "SELECT $__timeInterval(gt.ingested_at) AS time, ta.relayer AS provider, count() AS txs FROM default.geyser_transactions gt ARRAY JOIN arrayConcat(gt.static_unsigned_writable_accounts, gt.loaded_writable_accounts) AS acct INNER JOIN default.tip_accounts ta ON ta.tip_account = acct WHERE gt.is_vote = 0 AND $__timeFilter(gt.ingested_at) AND ta.relayer IN (${provider:singlequote}) GROUP BY time, provider ORDER BY time"
         }
       ]
     },
     {
       "id": 3,
       "type": "barchart",
-      "title": "Total fees by provider (SOL) — last 30m",
+      "title": "Transactions by provider",
       "datasource": { "type": "grafana-clickhouse-datasource", "uid": "ffpadt3v6cpvkc" },
-      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 10 },
-      "fieldConfig": { "defaults": { "unit": "none" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 17 },
+      "fieldConfig": { "defaults": {}, "overrides": [] },
       "options": { "orientation": "horizontal", "xField": "provider" },
       "targets": [
         {
@@ -60,7 +70,26 @@
           "editorType": "sql",
           "format": 1,
           "queryType": "table",
-          "rawSql": "SELECT ta.relayer AS provider, round(sum(gt.fee_sol), 4) AS total_fees_sol FROM default.geyser_transactions gt ARRAY JOIN arrayConcat(gt.static_unsigned_writable_accounts, gt.loaded_writable_accounts) AS acct INNER JOIN default.tip_accounts ta ON ta.tip_account = acct WHERE gt.is_vote = 0 AND gt.ingested_at > now() - INTERVAL 30 MINUTE GROUP BY provider ORDER BY total_fees_sol DESC"
+          "rawSql": "SELECT ta.relayer AS provider, count() AS transactions FROM default.geyser_transactions gt ARRAY JOIN arrayConcat(gt.static_unsigned_writable_accounts, gt.loaded_writable_accounts) AS acct INNER JOIN default.tip_accounts ta ON ta.tip_account = acct WHERE gt.is_vote = 0 AND $__timeFilter(gt.ingested_at) AND ta.relayer IN (${provider:singlequote}) GROUP BY provider ORDER BY transactions DESC"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "barchart",
+      "title": "Total fees by provider (SOL)",
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "ffpadt3v6cpvkc" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 17 },
+      "fieldConfig": { "defaults": {}, "overrides": [] },
+      "options": { "orientation": "horizontal", "xField": "provider" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "grafana-clickhouse-datasource", "uid": "ffpadt3v6cpvkc" },
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "table",
+          "rawSql": "SELECT ta.relayer AS provider, round(sum(gt.fee_sol), 4) AS total_fees_sol FROM default.geyser_transactions gt ARRAY JOIN arrayConcat(gt.static_unsigned_writable_accounts, gt.loaded_writable_accounts) AS acct INNER JOIN default.tip_accounts ta ON ta.tip_account = acct WHERE gt.is_vote = 0 AND $__timeFilter(gt.ingested_at) AND ta.relayer IN (${provider:singlequote}) GROUP BY provider ORDER BY total_fees_sol DESC"
         }
       ]
     }
