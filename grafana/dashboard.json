@@ -114,6 +114,24 @@
           "instant": true
         }
       ]
+    },
+    {
+      "id": 9,
+      "type": "table",
+      "title": "Sender provider economics — last 30m (on-chain, via geyser)",
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "ffpadt3v6cpvkc" },
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 16 },
+      "fieldConfig": { "defaults": {}, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "grafana-clickhouse-datasource", "uid": "ffpadt3v6cpvkc" },
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "table",
+          "rawSql": "SELECT ta.relayer AS provider, count() AS transactions, round(sum(gt.fee_sol), 4) AS total_fees_sol, round(avg(gt.fee_sol), 7) AS avg_fee_sol FROM default.geyser_transactions gt ARRAY JOIN arrayConcat(gt.static_unsigned_writable_accounts, gt.loaded_writable_accounts) AS acct INNER JOIN default.tip_accounts ta ON ta.tip_account = acct WHERE gt.is_vote = 0 AND gt.ingested_at > now() - INTERVAL 30 MINUTE GROUP BY provider ORDER BY transactions DESC"
+        }
+      ]
     }
   ]
 }
