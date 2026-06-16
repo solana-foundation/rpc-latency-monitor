@@ -22,9 +22,9 @@
         "query": "label_values(rpc_up, region)",
         "refresh": 2,
         "includeAll": true,
-        "multi": true,
+        "multi": false,
         "allValue": ".*",
-        "current": { "text": "All", "value": "$__all" }
+        "current": { "text": "us-east4", "value": "us-east4" }
       },
       {
         "name": "provider",
@@ -100,7 +100,7 @@
     {
       "id": 7,
       "type": "bargauge",
-      "title": "Win % by provider — overall avg, all regions ($method)",
+      "title": "Win % by provider ($method, $region)",
       "datasource": { "type": "prometheus", "uid": "${datasource}" },
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
       "fieldConfig": { "defaults": { "unit": "percent", "min": 0, "max": 100 }, "overrides": [] },
