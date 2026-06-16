@@ -5,9 +5,13 @@ variable "project_id" {
 variable "locations" {
   type = map(string)
   default = {
-    "us-east1"        = "us-east1-b"
+    "us-east4"        = "us-east4-b"
+    "us-west2"        = "us-west2-b"
+    "europe-west2"    = "europe-west2-b"
     "europe-west3"    = "europe-west3-b"
+    "asia-northeast3" = "asia-northeast3-b"
     "asia-northeast1" = "asia-northeast1-b"
+    "asia-southeast1" = "asia-southeast1-b"
   }
 }
 

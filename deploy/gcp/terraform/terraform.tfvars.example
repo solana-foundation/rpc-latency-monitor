@@ -1,9 +1,13 @@
-project_id    = "rpc-latency-monitor"
-monitor_image = "ghcr.io/solana-foundation/rpc-latency-monitor:latest"
+project_id    = "your-gcp-project-id"
+monitor_image = "us-east4-docker.pkg.dev/your-gcp-project-id/rpc-latency-monitor/rpc-latency-monitor:latest"
 doppler_token = "dp.st.xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 
 locations = {
-  "us-east1"        = "us-east1-b"
-  "europe-west3"    = "europe-west3-b"
-  "asia-northeast1" = "asia-northeast1-b"
+  "us-east4"        = "us-east4-b"      # us-east (Ashburn)
+  "us-west2"        = "us-west2-b"      # us-west (Los Angeles)
+  "europe-west2"    = "europe-west2-b"  # eu-west (London)
+  "europe-west3"    = "europe-west3-b"  # eu-east (Frankfurt)
+  "asia-northeast3" = "asia-northeast3-b" # Seoul (Dubai alt: me-central1-a)
+  "asia-northeast1" = "asia-northeast1-b" # Tokyo
+  "asia-southeast1" = "asia-southeast1-b" # Singapore
 }

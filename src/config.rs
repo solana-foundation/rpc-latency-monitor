@@ -129,7 +129,7 @@ mod tests {
         assert_eq!(config.server.bind.port(), 9464);
         assert_eq!(config.reference_slot.source, ReferenceSource::MaxObserved);
         assert_eq!(config.request_timeout, Duration::from_secs(10));
-        assert_eq!(config.providers.len(), 4);
+        assert_eq!(config.providers.len(), 3);
         assert!(config.checks.iter().any(|c| c.method == RpcMethod::GetSlot));
     }
 

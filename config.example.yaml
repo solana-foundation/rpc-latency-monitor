@@ -32,8 +32,6 @@ providers:
     url: "https://${TRITON_HOST}/${TRITON_TOKEN}"
   - name: quicknode
     url: "${QUICKNODE_URL}"
-  - name: public-mainnet
-    url: "https://api.mainnet-beta.solana.com"
 
 # Read checks to run against every provider. Each runs on its own loop.
 # `interval` is the base period; `jitter` randomizes it to avoid thundering herd.
