@@ -51,6 +51,9 @@
       "datasource": { "type": "grafana-clickhouse-datasource", "uid": "${ds_clickhouse}" },
       "gridPos": { "h": 8, "w": 24, "x": 0, "y": 9 },
       "fieldConfig": { "defaults": { "custom": { "drawStyle": "line", "fillOpacity": 10, "scaleDistribution": { "type": "log", "log": 10 } } }, "overrides": [] },
+      "transformations": [
+        { "id": "partitionByValues", "options": { "fields": ["provider"], "keepFields": false } }
+      ],
       "targets": [
         {
           "refId": "A",
@@ -58,7 +61,7 @@
           "editorType": "sql",
           "format": 1,
           "queryType": "table",
-          "rawSql": "SELECT $__timeInterval(gt.ingested_at) AS time, countIf(ta.relayer = 'temporal') AS temporal, countIf(ta.relayer = 'astralane') AS astralane, countIf(ta.relayer = 'jito') AS jito, countIf(ta.relayer = 'bloxroute') AS bloxroute, countIf(ta.relayer = '0slot') AS \"0slot\", countIf(ta.relayer = 'helius') AS helius, countIf(ta.relayer = 'stellium') AS stellium, countIf(ta.relayer = 'blockrazor') AS blockrazor, countIf(ta.relayer = 'temporal_private') AS temporal_private FROM default.geyser_transactions gt ARRAY JOIN arrayConcat(gt.static_unsigned_writable_accounts, gt.loaded_writable_accounts) AS acct INNER JOIN default.tip_accounts ta ON ta.tip_account = acct WHERE gt.is_vote = 0 AND gt.balance_deltas[acct] > 0 AND $__timeFilter(gt.ingested_at) AND ta.relayer IN (${provider:singlequote}) GROUP BY time ORDER BY time"
+          "rawSql": "SELECT $__timeInterval(gt.ingested_at) AS time, ta.relayer AS provider, count() AS txs FROM default.geyser_transactions gt ARRAY JOIN arrayConcat(gt.static_unsigned_writable_accounts, gt.loaded_writable_accounts) AS acct INNER JOIN default.tip_accounts ta ON ta.tip_account = acct WHERE gt.is_vote = 0 AND gt.balance_deltas[acct] > 0 AND $__timeFilter(gt.ingested_at) AND ta.relayer IN (${provider:singlequote}) GROUP BY time, provider ORDER BY time"
         }
       ]
     },
