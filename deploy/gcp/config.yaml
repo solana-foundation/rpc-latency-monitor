@@ -1,15 +1,6 @@
-# Fleet configuration shipped to every monitor VM (via Terraform instance
-# metadata). This is the deployed source of truth — review changes here.
-#
-# No secrets live in this file: api-keys/hosts are ${ENV} placeholders resolved
-# on the VM at boot from Doppler. `region` is a fallback only; each VM overrides
-# it with MONITOR_REGION, derived from its zone by the startup script.
-
 region: us-east4
 
 server:
-  # Localhost-only: metrics are scraped by the co-located Alloy agent, never
-  # exposed publicly.
   bind: "127.0.0.1:9464"
 
 reference_slot:

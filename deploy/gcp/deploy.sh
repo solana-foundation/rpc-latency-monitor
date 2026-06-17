@@ -1,14 +1,4 @@
 #!/usr/bin/env bash
-# Build a SHA-tagged monitor image and roll it out to the rpc-latency-monitor VM
-# fleet. Image, config, and the VM Doppler token travel as Terraform-managed
-# instance metadata; resetting each VM makes the COS startup script re-pull the
-# image and re-read config + secrets (a metadata change alone does not re-run it).
-#
-# Secrets/config come from Doppler — run this under `doppler run`, e.g.:
-#   PROJECT=rpc-latency-monitor REGION=us-east4 TF_STATE_BUCKET=<bucket> \
-#     doppler run --project rpc-latency-monitor --config prd -- ./deploy/gcp/deploy.sh
-#
-# TARGET selects what to deploy: all (default) | gcp | grafana.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

@@ -10,9 +10,6 @@ const BLOCK_CONFIRMATION_DEPTH: u64 = 32;
 const TOKEN_PROGRAM: &str = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
 const TOKEN_ACCOUNT_LEN: u64 = 165;
 const TOKEN_ACCOUNT_OWNER_OFFSET: u64 = 32;
-// getProgramAccounts benchmark owner: a stable wallet holding a bounded set of
-// SPL token accounts (~2.7k). Small enough that every provider serves it, large
-// enough to exercise a real index scan. Tunable.
 const GPA_TOKEN_OWNER: &str = "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]

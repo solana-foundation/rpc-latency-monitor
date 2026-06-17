@@ -1,24 +1,8 @@
-# Deploy the rpc-latency-monitor fleet. Push to main (src/deploy/grafana paths)
-# auto-deploys; manual runs via workflow_dispatch can scope the target.
-#
-# Required (GitHub Environment: prod):
-#   secrets: DOPPLER_TOKEN, SLACK_DEPLOY_WEBHOOK_URL
-#   vars:    GCP_WORKLOAD_IDENTITY_PROVIDER, GCP_SERVICE_ACCOUNT,
-#            GCP_PROJECT_ID, TF_STATE_BUCKET
-# Doppler (rpc-latency-monitor/prd) supplies: MONITOR_DOPPLER_TOKEN,
-#   GRAFANA_API_URL, GRAFANA_API_TOKEN, GRAFANA_FOLDER_UID.
 name: Deploy
 
 on:
   push:
     branches: [main]
-    paths:
-      - 'src/**'
-      - 'Cargo.toml'
-      - 'Cargo.lock'
-      - 'deploy/**'
-      - 'grafana/**'
-      - '.github/workflows/deploy.yml'
   workflow_dispatch:
     inputs:
       target:
@@ -30,19 +14,15 @@ on:
 
 permissions:
   contents: read
-  id-token: write
 
 concurrency:
   group: deploy
   cancel-in-progress: false
 
 jobs:
-  # Gate: a broken build/test must never reach the fleet. `push` runs this in
-  # parallel with the CI workflow, so we re-check here rather than trust timing.
   verify:
     name: Verify (fmt, clippy, test)
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
+    runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -56,7 +36,7 @@ jobs:
   deploy:
     name: Deploy fleet (${{ github.event_name == 'workflow_dispatch' && inputs.target || 'all' }})
     needs: verify
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     environment: prod
     env:
       TARGET: ${{ github.event_name == 'workflow_dispatch' && inputs.target || 'all' }}
@@ -66,20 +46,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Doppler CLI
-        uses: dopplerhq/cli-action@v3
-
-      - name: Authenticate to Google Cloud
-        uses: google-github-actions/auth@v3
-        with:
-          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
-
-      - uses: google-github-actions/setup-gcloud@v2
-      - uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_wrapper: false
-
+      # gcloud + terraform authenticate via the runner VM's attached service
+      # account (ADC); doppler/terraform/gcloud are preinstalled on the runner.
       - name: Build image + apply Terraform + roll the fleet
         env:
           DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN }}
