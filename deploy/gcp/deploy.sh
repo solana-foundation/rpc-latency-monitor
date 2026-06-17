@@ -59,16 +59,24 @@ deploy_gcp() {
   terraform -chdir="$TF_DIR" init -reconfigure \
     -backend-config="bucket=${TF_STATE_BUCKET}" \
     -backend-config="prefix=rpc-latency-monitor"
-  terraform -chdir="$TF_DIR" apply -auto-approve \
-    -var "project_id=${PROJECT}" \
-    -var "monitor_image=${IMAGE}" \
-    -var "doppler_token=${MONITOR_DOPPLER_TOKEN}"
+  # Pass the token via TF_VAR_ (env), not -var, so it never lands in the
+  # terraform process's /proc/<pid>/cmdline.
+  TF_VAR_doppler_token="${MONITOR_DOPPLER_TOKEN}" \
+    terraform -chdir="$TF_DIR" apply -auto-approve \
+      -var "project_id=${PROJECT}" \
+      -var "monitor_image=${IMAGE}"
 
+  # Reset one region at a time with a delay between, so only one VM is ever in
+  # its restart gap (COS reboot + image pull) — avoids a fleet-wide blind spot.
+  RESET_DELAY="${RESET_DELAY:-75}"
+  first=1
   gcloud compute instances list --project "$PROJECT" \
     --filter="labels.service=rpc-latency-monitor" \
     --format="value(name,zone)" |
     while read -r name zone; do
       [ -z "$name" ] && continue
+      [ "$first" -eq 1 ] || sleep "$RESET_DELAY"
+      first=0
       gcloud compute instances reset "$name" --project "$PROJECT" --zone "$zone"
       echo "reset $name"
     done

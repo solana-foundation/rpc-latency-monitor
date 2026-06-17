@@ -37,8 +37,25 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Gate: a broken build/test must never reach the fleet. `push` runs this in
+  # parallel with the CI workflow, so we re-check here rather than trust timing.
+  verify:
+    name: Verify (fmt, clippy, test)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+      - run: cargo fmt --all --check
+      - run: cargo clippy --all-targets --all-features -- -D warnings
+      - run: cargo test --all-features
+
   deploy:
     name: Deploy fleet (${{ github.event_name == 'workflow_dispatch' && inputs.target || 'all' }})
+    needs: verify
     runs-on: ubuntu-latest
     environment: prod
     env:
