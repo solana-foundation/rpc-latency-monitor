@@ -1,7 +1,9 @@
 pub mod methods;
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
+use reqwest::header::{HeaderMap, HeaderValue, CACHE_CONTROL, PRAGMA};
 use reqwest::StatusCode;
 use serde_json::Value;
 
@@ -74,14 +76,22 @@ impl ErrorKind {
 
 pub struct RpcClient {
     http: reqwest::Client,
+    next_id: AtomicU64,
 }
 
 impl RpcClient {
     pub fn new(request_timeout: Duration) -> reqwest::Result<Self> {
+        let mut headers = HeaderMap::new();
+        headers.insert(CACHE_CONTROL, HeaderValue::from_static("no-cache"));
+        headers.insert(PRAGMA, HeaderValue::from_static("no-cache"));
         let http = reqwest::Client::builder()
             .timeout(request_timeout)
+            .default_headers(headers)
             .build()?;
-        Ok(Self { http })
+        Ok(Self {
+            http,
+            next_id: AtomicU64::new(1),
+        })
     }
 
     pub async fn call(
@@ -93,7 +103,7 @@ impl RpcClient {
         let params = method.build_params(ctx)?;
         let body = serde_json::json!({
             "jsonrpc": "2.0",
-            "id": 1,
+            "id": self.next_id.fetch_add(1, Ordering::Relaxed),
             "method": method.rpc_name(),
             "params": params,
         });

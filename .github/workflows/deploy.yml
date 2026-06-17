@@ -52,6 +52,57 @@ jobs:
           workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
 
+      - name: Build Slack fields
+        id: summary
+        env:
+          ACTOR: ${{ github.actor }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          SHA=$(git rev-parse HEAD)
+          COMMIT_MSG=$(git log -1 --format=%s HEAD 2>/dev/null | cut -c1-140 || echo "")
+          FIELDS=$(jq -n \
+            --arg target     "$TARGET" \
+            --arg short_sha  "${SHA:0:7}" \
+            --arg commit_msg "$COMMIT_MSG" \
+            --arg actor      "$ACTOR" \
+            --arg run_url    "$RUN_URL" \
+            --arg run_id     "$RUN_ID" \
+            '[
+              {type:"mrkdwn",text:("*Target:*\n`"+$target+"`")},
+              {type:"mrkdwn",text:("*Commit:*\n`"+$short_sha+"` — "+$commit_msg)},
+              {type:"mrkdwn",text:("*Triggered by:*\n"+$actor)},
+              {type:"mrkdwn",text:("*Run:*\n<"+$run_url+"|workflow #"+$run_id+">")}
+            ]')
+          {
+            echo 'fields<<JQ_EOF'
+            echo "$FIELDS"
+            echo 'JQ_EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Notify Slack — deploy started
+        env:
+          SLACK: ${{ secrets.SLACK_DEPLOY_WEBHOOK_URL }}
+          FIELDS: ${{ steps.summary.outputs.fields }}
+        run: |
+          set -euo pipefail
+          if [ -z "${SLACK:-}" ]; then echo "::warning::SLACK_DEPLOY_WEBHOOK_URL missing — skipping"; exit 0; fi
+          echo "::add-mask::$SLACK"
+          PAYLOAD=$(jq -n \
+            --arg marker "[STARTED] Deploy rpc-latency-monitor" \
+            --arg target "$TARGET" \
+            --arg color  "#dbab09" \
+            --argjson fields "$FIELDS" \
+            '{
+              text: ("*" + $marker + "* — target: `" + $target + "`"),
+              attachments: [{color:$color, blocks:[
+                {type:"section", text:{type:"mrkdwn", text:("*" + $marker + "*")}},
+                {type:"section", fields:$fields}
+              ]}]
+            }')
+          curl -sS --fail-with-body -X POST -H 'Content-Type: application/json' --data "$PAYLOAD" "$SLACK"
+
       - name: Build image + apply Terraform + roll the fleet
         env:
           DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN }}
@@ -63,39 +114,48 @@ jobs:
             env PROJECT="$PROJECT" REGION="$REGION" TF_STATE_BUCKET="$TF_STATE_BUCKET" TARGET="$TARGET" \
             ./deploy/gcp/deploy.sh
 
-      - name: Notify Slack
-        if: always()
+      - name: Notify Slack — deploy succeeded
+        if: success()
         env:
           SLACK: ${{ secrets.SLACK_DEPLOY_WEBHOOK_URL }}
-          STATUS: ${{ job.status }}
-          ACTOR: ${{ github.actor }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          RUN_ID: ${{ github.run_id }}
+          FIELDS: ${{ steps.summary.outputs.fields }}
         run: |
           set -euo pipefail
-          if [ -z "${SLACK:-}" ]; then echo "::warning::SLACK_DEPLOY_WEBHOOK_URL missing — skipping"; exit 0; fi
+          if [ -z "${SLACK:-}" ]; then exit 0; fi
           echo "::add-mask::$SLACK"
-          SHA="$(git rev-parse HEAD)"
-          MSG="$(git log -1 --format=%s "$SHA" 2>/dev/null | cut -c1-140 || echo "")"
-          if [ "$STATUS" = "success" ]; then MARKER="[DONE] Deploy rpc-latency-monitor ($TARGET)"; COLOR="#36a64f"; else MARKER="[FAILED] Deploy rpc-latency-monitor ($TARGET)"; COLOR="#cc0000"; fi
-          FIELDS=$(jq -n \
-            --arg target "$TARGET" --arg short_sha "${SHA:0:7}" --arg msg "$MSG" \
-            --arg actor "$ACTOR" --arg run "$RUN_URL" --arg rid "$RUN_ID" \
-            '[
-              {type:"mrkdwn",text:("*Target:*\n`"+$target+"`")},
-              {type:"mrkdwn",text:("*Commit:*\n`"+$short_sha+"` — "+$msg)},
-              {type:"mrkdwn",text:("*Triggered by:*\n"+$actor)},
-              {type:"mrkdwn",text:("*Run:*\n<"+$run+"|workflow #"+$rid+">")}
-            ]')
-          PAYLOAD=$(jq -n --arg marker "$MARKER" --arg color "$COLOR" --argjson fields "$FIELDS" \
+          PAYLOAD=$(jq -n \
+            --arg marker "[SUCCESS] Deploy rpc-latency-monitor" \
+            --arg target "$TARGET" \
+            --arg color  "#36a64f" \
+            --argjson fields "$FIELDS" \
             '{
-              text: ("*" + $marker + "*"),
-              attachments: [{
-                color: $color,
-                blocks: [
-                  {type:"section", text:{type:"mrkdwn", text:("*" + $marker + "*")}},
-                  {type:"section", fields:$fields}
-                ]
-              }]
+              text: ("*" + $marker + "* — target: `" + $target + "`"),
+              attachments: [{color:$color, blocks:[
+                {type:"section", text:{type:"mrkdwn", text:("*" + $marker + "*")}},
+                {type:"section", fields:$fields}
+              ]}]
+            }')
+          curl -sS --fail-with-body -X POST -H 'Content-Type: application/json' --data "$PAYLOAD" "$SLACK"
+
+      - name: Notify Slack — deploy failed
+        if: failure()
+        env:
+          SLACK: ${{ secrets.SLACK_DEPLOY_WEBHOOK_URL }}
+          FIELDS: ${{ steps.summary.outputs.fields }}
+        run: |
+          set -euo pipefail
+          if [ -z "${SLACK:-}" ]; then exit 0; fi
+          echo "::add-mask::$SLACK"
+          PAYLOAD=$(jq -n \
+            --arg marker "[FAILED] Deploy rpc-latency-monitor" \
+            --arg target "$TARGET" \
+            --arg color  "#cc0000" \
+            --argjson fields "$FIELDS" \
+            '{
+              text: ("*" + $marker + "* — target: `" + $target + "`"),
+              attachments: [{color:$color, blocks:[
+                {type:"section", text:{type:"mrkdwn", text:("*" + $marker + "*")}},
+                {type:"section", fields:$fields}
+              ]}]
             }')
           curl -sS --fail-with-body -X POST -H 'Content-Type: application/json' --data "$PAYLOAD" "$SLACK"
