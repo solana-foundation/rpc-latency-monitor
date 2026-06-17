@@ -33,10 +33,10 @@ IMAGE="${REGION}-docker.pkg.dev/${PROJECT}/rpc-latency-monitor/rpc-latency-monit
 push_dashboards() {
   : "${GRAFANA_API_URL:?set via Doppler}"
   : "${GRAFANA_API_TOKEN:?set via Doppler}"
-  : "${GRAFANA_FOLDER_UID:?set via Doppler}"
+  # Folder UID is optional: empty puts dashboards in the root folder.
   echo "::add-mask::$GRAFANA_API_TOKEN" 2>/dev/null || true
   for f in "$REPO_ROOT"/grafana/*.json; do
-    payload="$(jq -n --slurpfile d "$f" --arg folder "$GRAFANA_FOLDER_UID" \
+    payload="$(jq -n --slurpfile d "$f" --arg folder "${GRAFANA_FOLDER_UID:-}" \
       '{dashboard: ($d[0] + {id: null}), folderUid: $folder, overwrite: true}')"
     curl -sS --fail-with-body -X POST "$GRAFANA_API_URL/api/dashboards/db" \
       -H "Authorization: Bearer $GRAFANA_API_TOKEN" \
