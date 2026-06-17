@@ -70,14 +70,12 @@ jobs:
           SHA=$(git rev-parse HEAD)
           COMMIT_MSG=$(git log -1 --format=%s HEAD 2>/dev/null | cut -c1-140 || echo "")
           FIELDS=$(jq -n \
-            --arg target     "$TARGET" \
             --arg short_sha  "${SHA:0:7}" \
             --arg commit_msg "$COMMIT_MSG" \
             --arg actor      "$ACTOR" \
             --arg run_url    "$RUN_URL" \
             --arg run_id     "$RUN_ID" \
             '[
-              {type:"mrkdwn",text:("*Target:*\n`"+$target+"`")},
               {type:"mrkdwn",text:("*Commit:*\n`"+$short_sha+"` — "+$commit_msg)},
               {type:"mrkdwn",text:("*Triggered by:*\n"+$actor)},
               {type:"mrkdwn",text:("*Run:*\n<"+$run_url+"|workflow #"+$run_id+">")}
@@ -98,11 +96,10 @@ jobs:
           echo "::add-mask::$SLACK"
           PAYLOAD=$(jq -n \
             --arg marker "[STARTED] Deploy rpc-latency-monitor" \
-            --arg target "$TARGET" \
-            --arg color  "#dbab09" \
+            --arg color  "#36a64f" \
             --argjson fields "$FIELDS" \
             '{
-              text: ("*" + $marker + "* — target: `" + $target + "`"),
+              text: ("*" + $marker + "*"),
               attachments: [{color:$color, blocks:[
                 {type:"section", text:{type:"mrkdwn", text:("*" + $marker + "*")}},
                 {type:"section", fields:$fields}
@@ -132,11 +129,10 @@ jobs:
           echo "::add-mask::$SLACK"
           PAYLOAD=$(jq -n \
             --arg marker "[SUCCESS] Deploy rpc-latency-monitor" \
-            --arg target "$TARGET" \
             --arg color  "#36a64f" \
             --argjson fields "$FIELDS" \
             '{
-              text: ("*" + $marker + "* — target: `" + $target + "`"),
+              text: ("*" + $marker + "*"),
               attachments: [{color:$color, blocks:[
                 {type:"section", text:{type:"mrkdwn", text:("*" + $marker + "*")}},
                 {type:"section", fields:$fields}
@@ -155,11 +151,10 @@ jobs:
           echo "::add-mask::$SLACK"
           PAYLOAD=$(jq -n \
             --arg marker "[FAILED] Deploy rpc-latency-monitor" \
-            --arg target "$TARGET" \
             --arg color  "#cc0000" \
             --argjson fields "$FIELDS" \
             '{
-              text: ("*" + $marker + "* — target: `" + $target + "`"),
+              text: ("*" + $marker + "*"),
               attachments: [{color:$color, blocks:[
                 {type:"section", text:{type:"mrkdwn", text:("*" + $marker + "*")}},
                 {type:"section", fields:$fields}
