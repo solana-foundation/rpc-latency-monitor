@@ -39,7 +39,8 @@ deploy_gcp() {
 
   gcloud builds submit "$REPO_ROOT" --project "$PROJECT" \
     --config "$REPO_ROOT/deploy/cloudbuild.yaml" \
-    --substitutions=_IMAGE="$IMAGE"
+    --substitutions=_IMAGE="$IMAGE" \
+    --suppress-logs
 
   terraform -chdir="$TF_DIR" init -reconfigure \
     -backend-config="bucket=${TF_STATE_BUCKET}" \
