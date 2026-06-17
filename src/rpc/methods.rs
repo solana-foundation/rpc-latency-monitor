@@ -7,6 +7,14 @@ const SYSTEM_PROGRAM: &str = "11111111111111111111111111111111";
 const HIGH_TRAFFIC_ADDRESS: &str = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const BLOCK_CONFIRMATION_DEPTH: u64 = 32;
 
+const TOKEN_PROGRAM: &str = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
+const TOKEN_ACCOUNT_LEN: u64 = 165;
+const TOKEN_ACCOUNT_OWNER_OFFSET: u64 = 32;
+// getProgramAccounts benchmark owner: a stable wallet holding a bounded set of
+// SPL token accounts (~2.7k). Small enough that every provider serves it, large
+// enough to exercise a real index scan. Tunable.
+const GPA_TOKEN_OWNER: &str = "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RpcMethod {
@@ -14,6 +22,7 @@ pub enum RpcMethod {
     GetSlot,
     GetLatestBlockhash,
     GetAccountInfo,
+    GetProgramAccounts,
     GetBlockRecent,
     GetTransactionRecent,
     GetSignaturesForAddress,
@@ -27,6 +36,7 @@ impl RpcMethod {
             Self::GetSlot => "getSlot",
             Self::GetLatestBlockhash => "getLatestBlockhash",
             Self::GetAccountInfo => "getAccountInfo",
+            Self::GetProgramAccounts => "getProgramAccounts",
             Self::GetBlockRecent => "getBlock_recent",
             Self::GetTransactionRecent => "getTransaction_recent",
             Self::GetSignaturesForAddress => "getSignaturesForAddress",
@@ -40,6 +50,7 @@ impl RpcMethod {
             Self::GetSlot => "getSlot",
             Self::GetLatestBlockhash => "getLatestBlockhash",
             Self::GetAccountInfo => "getAccountInfo",
+            Self::GetProgramAccounts => "getProgramAccounts",
             Self::GetBlockRecent => "getBlock",
             Self::GetTransactionRecent => "getTransaction",
             Self::GetSignaturesForAddress => "getSignaturesForAddress",
@@ -54,6 +65,16 @@ impl RpcMethod {
             Self::GetAccountInfo => {
                 json!([SYSTEM_PROGRAM, { "encoding": "base64", "commitment": "processed" }])
             }
+            Self::GetProgramAccounts => json!([TOKEN_PROGRAM, {
+                "encoding": "base64",
+                "commitment": "processed",
+                "withContext": true,
+                "dataSlice": { "offset": 0, "length": 0 },
+                "filters": [
+                    { "dataSize": TOKEN_ACCOUNT_LEN },
+                    { "memcmp": { "offset": TOKEN_ACCOUNT_OWNER_OFFSET, "bytes": GPA_TOKEN_OWNER } },
+                ],
+            }]),
             Self::GetSignaturesForAddress => json!([HIGH_TRAFFIC_ADDRESS, { "limit": 10 }]),
             Self::GetBlockRecent => {
                 let slot = ctx.tip_slot?.saturating_sub(BLOCK_CONFIRMATION_DEPTH);
@@ -80,7 +101,7 @@ impl RpcMethod {
     pub fn observed_slot(self, result: &Value) -> Option<u64> {
         match self {
             Self::GetSlot => result.as_u64(),
-            Self::GetLatestBlockhash | Self::GetAccountInfo => {
+            Self::GetLatestBlockhash | Self::GetAccountInfo | Self::GetProgramAccounts => {
                 result.get("context")?.get("slot")?.as_u64()
             }
             Self::GetHealth
@@ -144,11 +165,32 @@ mod tests {
     }
 
     #[test]
+    fn get_program_accounts_filters_by_owner_and_skips_account_data() {
+        let params = RpcMethod::GetProgramAccounts
+            .build_params(&RequestContext::default())
+            .expect("get_program_accounts always builds");
+        assert_eq!(params[0], json!(TOKEN_PROGRAM));
+        let opts = &params[1];
+        assert_eq!(opts["withContext"], json!(true));
+        assert_eq!(opts["dataSlice"], json!({ "offset": 0, "length": 0 }));
+        assert_eq!(opts["filters"][0], json!({ "dataSize": TOKEN_ACCOUNT_LEN }));
+        assert_eq!(
+            opts["filters"][1],
+            json!({ "memcmp": { "offset": TOKEN_ACCOUNT_OWNER_OFFSET, "bytes": GPA_TOKEN_OWNER } })
+        );
+    }
+
+    #[test]
     fn observed_slot_reads_the_right_field_per_method() {
         assert_eq!(RpcMethod::GetSlot.observed_slot(&json!(42)), Some(42));
         assert_eq!(
             RpcMethod::GetAccountInfo.observed_slot(&json!({ "context": { "slot": 7 } })),
             Some(7)
+        );
+        assert_eq!(
+            RpcMethod::GetProgramAccounts
+                .observed_slot(&json!({ "context": { "slot": 9 }, "value": [] })),
+            Some(9)
         );
         assert_eq!(RpcMethod::GetHealth.observed_slot(&json!("ok")), None);
     }

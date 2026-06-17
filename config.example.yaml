@@ -48,6 +48,9 @@ checks:
   - method: get_account_info
     interval: "10s"
     jitter: "2s"
+  - method: get_program_accounts
+    interval: "30s"
+    jitter: "5s"
   - method: get_block_recent
     interval: "10s"
     jitter: "2s"

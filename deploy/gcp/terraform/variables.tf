@@ -31,7 +31,7 @@ variable "doppler_token" {
 
 variable "config_file" {
   type    = string
-  default = "../../../config.yaml"
+  default = "../config.yaml"
 }
 
 variable "alloy_config_file" {
