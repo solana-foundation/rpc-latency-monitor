@@ -18,12 +18,9 @@ git_tag() {
 
 IMAGE="${REGION}-docker.pkg.dev/${PROJECT}/rpc-latency-monitor/rpc-latency-monitor:$(git_tag)"
 
-# Upsert every dashboard in grafana/ into the Grafana Cloud stack. Creds come
-# from Doppler; the API token is masked so it never lands in CI logs.
 push_dashboards() {
   : "${GRAFANA_API_URL:?set via Doppler}"
   : "${GRAFANA_API_TOKEN:?set via Doppler}"
-  # Folder UID is optional: empty puts dashboards in the root folder.
   echo "::add-mask::$GRAFANA_API_TOKEN" 2>/dev/null || true
   for f in "$REPO_ROOT"/grafana/*.json; do
     payload="$(jq -n --slurpfile d "$f" --arg folder "${GRAFANA_FOLDER_UID:-}" \
@@ -36,8 +33,6 @@ push_dashboards() {
   done
 }
 
-# Build the image, apply Terraform (which refreshes image + config metadata),
-# then reset each VM so the startup script re-pulls and restarts the containers.
 deploy_gcp() {
   : "${TF_STATE_BUCKET:?set the GCS bucket holding terraform state}"
   : "${MONITOR_DOPPLER_TOKEN:?VM Doppler service token, set via Doppler}"
@@ -49,15 +44,11 @@ deploy_gcp() {
   terraform -chdir="$TF_DIR" init -reconfigure \
     -backend-config="bucket=${TF_STATE_BUCKET}" \
     -backend-config="prefix=rpc-latency-monitor"
-  # Pass the token via TF_VAR_ (env), not -var, so it never lands in the
-  # terraform process's /proc/<pid>/cmdline.
   TF_VAR_doppler_token="${MONITOR_DOPPLER_TOKEN}" \
     terraform -chdir="$TF_DIR" apply -auto-approve \
       -var "project_id=${PROJECT}" \
       -var "monitor_image=${IMAGE}"
 
-  # Reset one region at a time with a delay between, so only one VM is ever in
-  # its restart gap (COS reboot + image pull) — avoids a fleet-wide blind spot.
   RESET_DELAY="${RESET_DELAY:-75}"
   first=1
   gcloud compute instances list --project "$PROJECT" \

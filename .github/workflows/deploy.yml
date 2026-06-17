@@ -46,8 +46,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # gcloud + terraform authenticate via the runner VM's attached service
-      # account (ADC); doppler/terraform/gcloud are preinstalled on the runner.
       - name: Build image + apply Terraform + roll the fleet
         env:
           DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN }}
