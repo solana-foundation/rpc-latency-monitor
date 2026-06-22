@@ -235,6 +235,11 @@ Please keep changes focused, prefer self-documenting code over comments, and fol
 metric and configuration conventions. New providers and regions should be additive and require no
 code changes — they are configuration.
 
+Publishing the dashboard publicly (read-only share or snapshot, fronted by Cloudflare, with `/metrics`
+kept localhost-only): see [`docs/public-hardening.md`](./docs/public-hardening.md) and the committable
+Cloudflare WAF / rate-limit / cache rules in [`deploy/cloudflare/waf-rules.json`](./deploy/cloudflare/waf-rules.json).
+None of this flips anything public on its own.
+
 ## License
 
 Licensed under the Apache License, Version 2.0. See [LICENSE](./LICENSE).
