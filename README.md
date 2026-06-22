@@ -166,8 +166,21 @@ code changes required.
 
 ## Deployment
 
-The monitor runs as one lightweight container per region, each exporting Prometheus metrics that are
-scraped locally and forwarded to Grafana Cloud.
+The Solana Foundation runs the monitor on Google Cloud — one lightweight container per region — so
+latency is measured from where traders actually are. The fleet spans seven regions across North
+America, Europe, and Asia:
+
+| Region | Location |
+| --- | --- |
+| `us-east4` | Virginia, US |
+| `us-west2` | Los Angeles, US |
+| `europe-west2` | London, UK |
+| `europe-west3` | Frankfurt, DE |
+| `asia-northeast1` | Tokyo, JP |
+| `asia-northeast3` | Seoul, KR |
+| `asia-southeast1` | Singapore, SG |
+
+Each container exports Prometheus metrics that are scraped locally and forwarded to Grafana Cloud.
 
 ## Dashboards
 
