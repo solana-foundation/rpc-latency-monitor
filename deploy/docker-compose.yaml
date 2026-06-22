@@ -31,7 +31,6 @@ services:
       GF_AUTH_DISABLE_LOGIN_FORM: "true"
     volumes:
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
-      - ../grafana/alerts:/etc/grafana/provisioning/alerting:ro
       - ../grafana/dashboard.json:/var/lib/grafana/dashboards/dashboard.json:ro
     ports:
       - "3000:3000"
