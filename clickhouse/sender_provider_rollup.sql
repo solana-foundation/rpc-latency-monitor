@@ -13,7 +13,7 @@
 --   NOT be run against production by this repo. The objects below live in
 --   the geyser ClickHouse cluster (database `default`, alongside
 --   geyser_transactions / tip_accounts) and must be created by the
---   geyser-data team. See clickhouse/README.md for the explicit hand-off.
+--   geyser-data team; the Sender dashboard returns no data until they apply this file (a hard dependency).
 --
 -- Granularity
 --   1-minute buckets keyed on (provider, bucket). The dashboard's default
