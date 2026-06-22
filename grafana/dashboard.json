@@ -114,6 +114,25 @@
           "instant": true
         }
       ]
+    },
+    {
+      "id": 8,
+      "type": "bargauge",
+      "title": "Win % by provider per region ($method)",
+      "description": "For the selected $method, each provider's share of the time it had the lowest avg latency, broken out per region. Computed from rpc_latency_seconds as rate(_sum)/rate(_count) per provider+region, compared against the per-region minimum (== bool on region group_left), averaged over the trailing hour.",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 16 },
+      "fieldConfig": { "defaults": { "unit": "percent", "min": 0, "max": 100 }, "overrides": [] },
+      "options": { "orientation": "horizontal", "displayMode": "gradient", "showUnfilled": true },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "expr": "100 * avg by (provider, region) ( avg_over_time( ( (sum by (provider, region) (rate(rpc_latency_seconds_sum{method=\"$method\", region=~\"$region\", provider=~\"$provider\"}[$__rate_interval])) / sum by (provider, region) (rate(rpc_latency_seconds_count{method=\"$method\", region=~\"$region\", provider=~\"$provider\"}[$__rate_interval]))) == bool on (region) group_left() (min by (region) (sum by (provider, region) (rate(rpc_latency_seconds_sum{method=\"$method\", region=~\"$region\", provider=~\"$provider\"}[$__rate_interval])) / sum by (provider, region) (rate(rpc_latency_seconds_count{method=\"$method\", region=~\"$region\", provider=~\"$provider\"}[$__rate_interval])))) )[1h:1m] ) )",
+          "legendFormat": "{{region}} / {{provider}}",
+          "instant": true
+        }
+      ]
     }
   ]
 }
