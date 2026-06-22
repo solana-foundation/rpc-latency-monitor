@@ -1,0 +1,138 @@
+{
+  "title": "RPC Latency Monitor",
+  "uid": "rpc-latency-monitor",
+  "schemaVersion": 39,
+  "editable": true,
+  "tags": ["solana", "rpc", "latency"],
+  "time": { "from": "now-6h", "to": "now" },
+  "refresh": "30s",
+  "templating": {
+    "list": [
+      {
+        "name": "datasource",
+        "type": "datasource",
+        "query": "prometheus",
+        "current": {},
+        "hide": 0
+      },
+      {
+        "name": "region",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "${datasource}" },
+        "query": "label_values(rpc_up, region)",
+        "refresh": 2,
+        "includeAll": true,
+        "multi": false,
+        "allValue": ".*",
+        "current": { "text": "us-east4", "value": "us-east4" }
+      },
+      {
+        "name": "provider",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "${datasource}" },
+        "query": "label_values(rpc_up{region=~\"$region\", provider!=\"public-mainnet\"}, provider)",
+        "refresh": 2,
+        "includeAll": true,
+        "multi": true,
+        "current": { "text": "All", "value": "$__all" }
+      },
+      {
+        "name": "method",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "${datasource}" },
+        "query": "label_values(rpc_latency_seconds_count, method)",
+        "refresh": 2,
+        "includeAll": false,
+        "multi": false,
+        "current": { "text": "getLatestBlockhash", "value": "getLatestBlockhash" }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "p99 latency by provider ($method)",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "expr": "histogram_quantile(0.99, sum by (le, provider) (rate(rpc_latency_seconds_bucket{method=\"$method\", region=~\"$region\", provider=~\"$provider\"}[$__rate_interval])))",
+          "legendFormat": "{{provider}}"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "p50 latency by provider ($method)",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "expr": "histogram_quantile(0.50, sum by (le, provider) (rate(rpc_latency_seconds_bucket{method=\"$method\", region=~\"$region\", provider=~\"$provider\"}[$__rate_interval])))",
+          "legendFormat": "{{provider}}"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Slot lag by provider",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "expr": "max by (provider) (rpc_slot_lag{region=~\"$region\", provider=~\"$provider\"})",
+          "legendFormat": "{{provider}}"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "bargauge",
+      "title": "Win % by provider ($method, $region)",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "fieldConfig": { "defaults": { "unit": "percent", "min": 0, "max": 100 }, "overrides": [] },
+      "options": { "orientation": "horizontal", "displayMode": "gradient" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "expr": "100 * avg by (provider) ( avg_over_time( ( (sum by (provider, region) (rate(rpc_latency_seconds_sum{method=\"$method\", region=~\"$region\", provider=~\"$provider\"}[$__rate_interval])) / sum by (provider, region) (rate(rpc_latency_seconds_count{method=\"$method\", region=~\"$region\", provider=~\"$provider\"}[$__rate_interval]))) == bool on (region) group_left() (min by (region) (sum by (provider, region) (rate(rpc_latency_seconds_sum{method=\"$method\", region=~\"$region\", provider=~\"$provider\"}[$__rate_interval])) / sum by (provider, region) (rate(rpc_latency_seconds_count{method=\"$method\", region=~\"$region\", provider=~\"$provider\"}[$__rate_interval])))) )[1h:1m] ) )",
+          "legendFormat": "{{provider}}",
+          "instant": true
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "type": "bargauge",
+      "title": "Win % by provider per region ($method)",
+      "description": "For the selected $method, each provider's share of the time it had the lowest avg latency, broken out per region. Computed from rpc_latency_seconds as rate(_sum)/rate(_count) per provider+region, compared against the per-region minimum (== bool on region group_left), averaged over the trailing hour.",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 16 },
+      "fieldConfig": { "defaults": { "unit": "percent", "min": 0, "max": 100 }, "overrides": [] },
+      "options": { "orientation": "horizontal", "displayMode": "gradient", "showUnfilled": true },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "expr": "100 * avg by (provider, region) ( avg_over_time( ( (sum by (provider, region) (rate(rpc_latency_seconds_sum{method=\"$method\", region=~\"$region\", provider=~\"$provider\"}[$__rate_interval])) / sum by (provider, region) (rate(rpc_latency_seconds_count{method=\"$method\", region=~\"$region\", provider=~\"$provider\"}[$__rate_interval]))) == bool on (region) group_left() (min by (region) (sum by (provider, region) (rate(rpc_latency_seconds_sum{method=\"$method\", region=~\"$region\", provider=~\"$provider\"}[$__rate_interval])) / sum by (provider, region) (rate(rpc_latency_seconds_count{method=\"$method\", region=~\"$region\", provider=~\"$provider\"}[$__rate_interval])))) )[1h:1m] ) )",
+          "legendFormat": "{{region}} / {{provider}}",
+          "instant": true
+        }
+      ]
+    }
+  ]
+}

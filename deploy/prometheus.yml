@@ -1,0 +1,7 @@
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: rpc-latency-monitor
+    static_configs:
+      - targets: ["monitor:9464"]

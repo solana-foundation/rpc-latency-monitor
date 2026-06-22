@@ -1,0 +1,38 @@
+services:
+  monitor:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    command: ["--config", "/etc/rpc-latency-monitor/config.yaml"]
+    environment:
+      RUST_LOG: info
+    env_file:
+      - path: ../.env
+        required: false
+    volumes:
+      - ../config.yaml:/etc/rpc-latency-monitor/config.yaml:ro
+    ports:
+      - "9464:9464"
+
+  prometheus:
+    image: prom/prometheus:latest
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+    depends_on:
+      - monitor
+
+  grafana:
+    image: grafana/grafana:latest
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      GF_AUTH_DISABLE_LOGIN_FORM: "true"
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ../grafana/dashboard.json:/var/lib/grafana/dashboards/dashboard.json:ro
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus

@@ -1,0 +1,126 @@
+{
+  "title": "Sender",
+  "uid": "rpc-sender",
+  "schemaVersion": 39,
+  "editable": true,
+  "tags": ["solana", "sender", "landing"],
+  "time": { "from": "now-30m", "to": "now" },
+  "refresh": "1m",
+  "templating": {
+    "list": [
+      {
+        "name": "ds_clickhouse",
+        "type": "datasource",
+        "query": "grafana-clickhouse-datasource",
+        "current": {},
+        "hide": 0
+      },
+      {
+        "name": "provider",
+        "type": "custom",
+        "query": "0slot,astralane,blockrazor,bloxroute,helius,jito,stellium,temporal,temporal_private",
+        "includeAll": true,
+        "multi": true,
+        "current": { "text": "All", "value": "$__all" }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "table",
+      "title": "Provider economics",
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "${ds_clickhouse}" },
+      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 0 },
+      "fieldConfig": { "defaults": {}, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "grafana-clickhouse-datasource", "uid": "${ds_clickhouse}" },
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "table",
+          "rawSql": "SELECT provider, countMerge(tx_count) AS \"Transactions\", round(sumMerge(total_tips_lamports) / 1e9, 4) AS \"Total tips (SOL)\", round(sumMerge(total_fees_sol), 4) AS \"Total fees (SOL)\", round(quantileMerge(0.5)(tip_quantiles_lamports)) AS \"Median tip (lamports)\", round(quantileMerge(0.5)(fee_quantiles_sol) * 1e9) AS \"Median fee (lamports)\" FROM default.sender_provider_rollup WHERE $__timeFilter(bucket) AND provider IN (${provider:singlequote}) GROUP BY provider ORDER BY countMerge(tx_count) DESC"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Tipping transactions over time by provider",
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "${ds_clickhouse}" },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 9 },
+      "fieldConfig": { "defaults": { "custom": { "drawStyle": "line", "fillOpacity": 10, "scaleDistribution": { "type": "log", "log": 10 } } }, "overrides": [] },
+      "transformations": [
+        { "id": "partitionByValues", "options": { "fields": ["provider"], "keepFields": false } }
+      ],
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "grafana-clickhouse-datasource", "uid": "${ds_clickhouse}" },
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "table",
+          "rawSql": "SELECT $__timeInterval(bucket) AS time, provider, countMerge(tx_count) AS txs FROM default.sender_provider_rollup WHERE $__timeFilter(bucket) AND provider IN (${provider:singlequote}) GROUP BY time, provider ORDER BY time"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "barchart",
+      "title": "Tipping transactions by provider",
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "${ds_clickhouse}" },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 17 },
+      "fieldConfig": { "defaults": {}, "overrides": [] },
+      "options": { "orientation": "horizontal", "xField": "provider" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "grafana-clickhouse-datasource", "uid": "${ds_clickhouse}" },
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "table",
+          "rawSql": "SELECT provider, countMerge(tx_count) AS transactions FROM default.sender_provider_rollup WHERE $__timeFilter(bucket) AND provider IN (${provider:singlequote}) GROUP BY provider ORDER BY transactions DESC"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "barchart",
+      "title": "Total tips by provider (SOL)",
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "${ds_clickhouse}" },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 17 },
+      "fieldConfig": { "defaults": {}, "overrides": [] },
+      "options": { "orientation": "horizontal", "xField": "provider" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "grafana-clickhouse-datasource", "uid": "${ds_clickhouse}" },
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "table",
+          "rawSql": "SELECT provider, round(sumMerge(total_tips_lamports) / 1e9, 4) AS total_tips_sol FROM default.sender_provider_rollup WHERE $__timeFilter(bucket) AND provider IN (${provider:singlequote}) GROUP BY provider ORDER BY total_tips_sol DESC"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "barchart",
+      "title": "Total fees by provider (SOL)",
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "${ds_clickhouse}" },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 17 },
+      "fieldConfig": { "defaults": {}, "overrides": [] },
+      "options": { "orientation": "horizontal", "xField": "provider" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "grafana-clickhouse-datasource", "uid": "${ds_clickhouse}" },
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "table",
+          "rawSql": "SELECT provider, round(sumMerge(total_fees_sol), 4) AS total_fees_sol FROM default.sender_provider_rollup WHERE $__timeFilter(bucket) AND provider IN (${provider:singlequote}) GROUP BY provider ORDER BY total_fees_sol DESC"
+        }
+      ]
+    }
+  ]
+}

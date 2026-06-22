@@ -1,0 +1,67 @@
+# rpc-latency-monitor — example configuration.
+#
+# Copy to config.yaml and edit. Secrets must NOT be inlined here: use ${ENV_VAR}
+# placeholders for api-keys (resolved at startup from the environment / .env).
+#
+# Durations accept humantime strings: "500ms", "2s", "1m".
+
+# This instance's region tag. On GCP it is overridden by the MONITOR_REGION env
+# var, which the startup script derives from the VM's zone metadata.
+region: local
+
+server:
+  # Address for the Prometheus /metrics and /health endpoints.
+  bind: "0.0.0.0:9464"
+
+reference_slot:
+  # How the chain "tip" slot is tracked to compute per-response slot lag.
+  #   max_observed: take the highest `processed` slot seen across all providers
+  #                 (neutral — depends on no single provider).
+  source: max_observed
+  # Optional: a dedicated endpoint polled for the reference slot. Leave unset to
+  # rely purely on max_observed.
+  # endpoint: "https://api.mainnet-beta.solana.com"
+  # poll_interval: "1s"
+
+# RPC providers to benchmark. `url` may contain a ${ENV_VAR} placeholder; the
+# whole api-key/url secret is supplied via the environment.
+providers:
+  - name: helius
+    url: "https://mainnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}"
+  - name: triton
+    url: "https://${TRITON_HOST}/${TRITON_TOKEN}"
+  - name: quicknode
+    url: "${QUICKNODE_URL}"
+  - name: alchemy
+    url: "${ALCHEMY_URL}"
+
+# Read checks to run against every provider. Each runs on its own loop.
+# `interval` is the base period; `jitter` randomizes it to avoid thundering herd.
+checks:
+  - method: get_health
+    interval: "5s"
+    jitter: "1s"
+  - method: get_slot
+    interval: "2s"
+    jitter: "500ms"
+  - method: get_latest_blockhash
+    interval: "5s"
+    jitter: "1s"
+  - method: get_account_info
+    interval: "10s"
+    jitter: "2s"
+  - method: get_program_accounts
+    interval: "30s"
+    jitter: "5s"
+  - method: get_block_recent
+    interval: "10s"
+    jitter: "2s"
+  - method: get_transaction_recent
+    interval: "10s"
+    jitter: "2s"
+  - method: get_signatures_for_address
+    interval: "10s"
+    jitter: "2s"
+
+# Per-request timeout for outbound RPC calls.
+request_timeout: "10s"
