@@ -6,7 +6,7 @@
   "orgID": 1,
   "ruleGroup": "rpc-latency-monitor",
   "folderUID": "${GRAFANA_FOLDER_UID}",
-  "noDataState": "NoData",
+  "noDataState": "Alerting",
   "execErrState": "Error",
   "labels": {
     "severity": "critical",

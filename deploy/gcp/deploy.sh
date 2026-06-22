@@ -31,7 +31,6 @@ push_dashboards() {
       -d "$payload" >/dev/null
     echo "pushed dashboard $(basename "$f")"
   done
-  push_alerts
 }
 
 # Upsert Grafana alert rules (alerting as code) from grafana/alerts/*.json.
@@ -54,17 +53,26 @@ push_alerts() {
               gsub("\\$\\{GRAFANA_DATASOURCE_UID\\}"; $ds)
               | gsub("\\$\\{GRAFANA_FOLDER_UID\\}"; $folder)
             else . end)' "$f")"
-    # Upsert: update by UID, falling back to create when it does not exist yet.
-    if ! curl -sS --fail-with-body -X PUT "$GRAFANA_API_URL/api/v1/provisioning/alert-rules/$uid" \
-        -H "Authorization: Bearer $GRAFANA_API_TOKEN" \
-        -H "Content-Type: application/json" \
-        -H "X-Disable-Provenance: true" \
-        -d "$payload" >/dev/null 2>&1; then
+    # Upsert: update by UID, falling back to create only when the rule does not
+    # exist yet (404). Any other PUT failure (400/401/403/5xx) is surfaced and
+    # hard-fails so a transient error can't silently create a duplicate rule.
+    local put_body put_code
+    put_body="$(curl -sS -w '\n%{http_code}' -X PUT "$GRAFANA_API_URL/api/v1/provisioning/alert-rules/$uid" \
+      -H "Authorization: Bearer $GRAFANA_API_TOKEN" \
+      -H "Content-Type: application/json" \
+      -H "X-Disable-Provenance: true" \
+      -d "$payload")"
+    put_code="${put_body##*$'\n'}"
+    put_body="${put_body%$'\n'*}"
+    if [ "$put_code" = "404" ]; then
       curl -sS --fail-with-body -X POST "$GRAFANA_API_URL/api/v1/provisioning/alert-rules" \
         -H "Authorization: Bearer $GRAFANA_API_TOKEN" \
         -H "Content-Type: application/json" \
         -H "X-Disable-Provenance: true" \
         -d "$payload" >/dev/null
+    elif [ "$put_code" -lt 200 ] || [ "$put_code" -ge 300 ]; then
+      echo "failed to upsert alert rule $(basename "$f") (HTTP $put_code): $put_body" >&2
+      exit 1
     fi
     echo "pushed alert rule $(basename "$f")"
   done
@@ -102,9 +110,9 @@ deploy_gcp() {
 }
 
 case "$TARGET" in
-  grafana) push_dashboards ;;
+  grafana) push_dashboards; push_alerts ;;
   gcp) deploy_gcp ;;
-  all) push_dashboards; deploy_gcp ;;
+  all) push_dashboards; push_alerts; deploy_gcp ;;
   *) echo "unknown TARGET: $TARGET (want: all|gcp|grafana)" >&2; exit 1 ;;
 esac
 

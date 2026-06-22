@@ -19,7 +19,9 @@ condition (`refId: C`) holds for the rule's `for` duration. Rules are grouped un
 
 - **Provider down** — `rpc_up` is `1` on a successful check and `0` on failure. The
   rule takes the `min` per provider/region so any failing region trips it. A 5m `for`
-  window rides out single transient check failures.
+  window rides out single transient check failures. Uses `noDataState: Alerting` (the
+  other rules use `NoData`) so that total scrape loss — the VM down, a region offline,
+  or `rpc_up` series disappearing entirely — pages rather than going silently to NoData.
 - **Slot lag elevated** — `rpc_slot_lag` is how far a provider's reported slot trails
   the max-observed chain tip. 150 slots is roughly 60s behind. Smoothed with a 5m
   average so brief congestion spikes don't alert.
@@ -40,8 +42,9 @@ existing Grafana env/secret pattern — no new secrets are introduced:
 
 ## Deployment
 
-`deploy/gcp/deploy.sh push_dashboards` (run via `TARGET=grafana` or `all`) pushes both
-the dashboards and these alert rules. For each rule it substitutes the placeholders and
+`deploy/gcp/deploy.sh` (run via `TARGET=grafana` or `all`) pushes both the dashboards
+(`push_dashboards`) and these alert rules (`push_alerts`) as separate steps. For each
+rule it substitutes the placeholders and
 upserts via `PUT /api/v1/provisioning/alert-rules/{uid}` (falling back to `POST` to
 create), reusing `GRAFANA_API_URL` / `GRAFANA_API_TOKEN`. The `X-Disable-Provenance`
 header keeps the rules editable as provisioned-via-API rather than file-locked.
