@@ -108,6 +108,9 @@ Either way, enable on the zone/hostname:
 
 - **Caching**: cache the dashboard HTML/JSON and static assets at the edge with a short TTL (30–60s) so a
   burst of viewers collapses into a single origin fetch. See the cache rule in the committed config.
+  Note: edge caching of dashboard payloads only takes effect under the **proxied-CNAME** option (where
+  the content traverses `DASHBOARD_HOSTNAME`). Under the **redirect** option only the 301/302 is cached;
+  Grafana's CDN serves the actual dashboard, so do not rely on Cloudflare burst protection there.
 - **WAF**: Cloudflare Managed Ruleset + our custom ruleset (committed below) — method allow-list, block
   obvious probes, and only allow the dashboard paths.
 - **Rate limiting**: per-IP cap so no single client can hammer the public URL (committed below).
@@ -150,7 +153,11 @@ Guardrails to keep it that way:
       datasource settings.
 - [ ] No `GRAFANA_CLOUD_*` token, service-account token, or API key appears in any public response or
       page source.
-- [ ] `curl https://DASHBOARD_HOSTNAME/api/...` (Grafana API paths) is blocked/redirected by the WAF.
+- [ ] `curl https://DASHBOARD_HOSTNAME/api/admin/...` (Grafana admin/query API) is blocked by the WAF.
+      Note: the Grafana **public-dashboard data API** (`/api/public/dashboards/<token>/query` and
+      `/annotations`) must still pass — under the proxied-CNAME routing option the panels fetch it
+      client-side, so `waf-rules.json` carves it out with an allow rule ahead of the broad `/api/` block.
+      Under the redirect routing option neither path reaches `DASHBOARD_HOSTNAME`.
 - [ ] `curl http://<vm-external-ip>:9464/metrics` from outside the VM **fails** (connection refused /
       filtered).
 - [ ] Rate-limit rule trips under a burst from a single IP (test with a throwaway IP, not production

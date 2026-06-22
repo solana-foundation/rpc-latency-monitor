@@ -24,6 +24,16 @@
         "action": "block"
       },
       {
+        "_note": "Proxied-CNAME routing only: Grafana public dashboards render client-side and fetch panel data from /api/public/dashboards/<token>/query and /annotations. This allow rule must precede the broad /api/ block below, or those data fetches return 403 and the dashboard renders blank. Harmless under the Redirect Rule routing option (the public never hits DASHBOARD_HOSTNAME for /api/), but required for the proxied-CNAME option in docs/public-hardening.md Layer 2.",
+        "description": "Allow Grafana public-dashboard data API (panel queries/annotations) needed under proxied-CNAME routing",
+        "expression": "(http.host eq \"DASHBOARD_HOSTNAME\") and (http.request.method in {\"GET\" \"HEAD\" \"OPTIONS\" \"POST\"}) and starts_with(http.request.uri.path, \"/api/public/dashboards/\")",
+        "action": "skip",
+        "action_parameters": {
+          "ruleset": "current"
+        }
+      },
+      {
+        "_note": "The /d/ and /dashboards prefixes (and the broad /api/ block) prevent navigation to other dashboards and the admin/query API. Under proxied-CNAME routing the allow rule above must run first so /api/public/dashboards/ still passes. Under the Redirect Rule option none of these paths reach DASHBOARD_HOSTNAME, so the block is pure defense-in-depth.",
         "description": "Block Grafana API / admin / auth / datasource paths from the public host",
         "expression": "(http.host eq \"DASHBOARD_HOSTNAME\") and (starts_with(http.request.uri.path, \"/api/\") or starts_with(http.request.uri.path, \"/admin/\") or starts_with(http.request.uri.path, \"/login\") or starts_with(http.request.uri.path, \"/logout\") or starts_with(http.request.uri.path, \"/explore\") or starts_with(http.request.uri.path, \"/datasources\") or starts_with(http.request.uri.path, \"/d/\") or starts_with(http.request.uri.path, \"/dashboards\"))",
         "action": "block"
@@ -47,14 +57,15 @@
     "phase": "http_ratelimit",
     "rules": [
       {
+        "_note": "Key is ip.src + cf.colo.id, so the mitigation applies per IP per PoP. Offices, mobile carriers, and university networks share one egress IP, so we use managed_challenge (not block) and a short 120s timeout to avoid locking out legitimate shared-IP viewers for 10 minutes after one occupant crosses the threshold. Genuinely abusive clients fail the challenge; humans pass it.",
         "description": "Per-IP rate limit on the public dashboard host",
         "expression": "(http.host eq \"DASHBOARD_HOSTNAME\")",
-        "action": "block",
+        "action": "managed_challenge",
         "ratelimit": {
           "characteristics": ["cf.colo.id", "ip.src"],
           "period": 60,
           "requests_per_period": 120,
-          "mitigation_timeout": 600,
+          "mitigation_timeout": 120,
           "counting_expression": "(http.host eq \"DASHBOARD_HOSTNAME\")"
         }
       }
@@ -67,6 +78,7 @@
     "phase": "http_request_cache_settings",
     "rules": [
       {
+        "_note": "Effective only under the proxied-CNAME routing option, where dashboard payloads traverse DASHBOARD_HOSTNAME. Under the Redirect Rule option, DASHBOARD_HOSTNAME returns a 301/302 and the /public-dashboards/, /public/, and /avatar/ responses are served by Grafana's CDN (rpclatency.grafana.net) and never reach this rule, so only the redirect is cached, not the dashboard content. Do not assume burst protection from edge caching when using the redirect approach.",
         "description": "Edge-cache dashboard responses briefly so viewer bursts collapse to a single origin fetch",
         "expression": "(http.host eq \"DASHBOARD_HOSTNAME\") and (starts_with(http.request.uri.path, \"DASHBOARD_PATH_PREFIX\") or starts_with(http.request.uri.path, \"/public/\") or starts_with(http.request.uri.path, \"/avatar/\"))",
         "action": "set_cache_settings",
