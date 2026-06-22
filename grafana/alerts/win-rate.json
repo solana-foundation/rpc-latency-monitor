@@ -12,13 +12,14 @@
           "title": "RPC provider win-rate below 95% in a region",
           "condition": "C",
           "for": "10m",
-          "noDataState": "NoData",
+          "noDataState": "KeepLast",
           "execErrState": "Error",
           "labels": {
             "severity": "warning",
             "team": "rpc"
           },
           "annotations": {
+            "__canary_method__": "getLatestBlockhash is the intentional canary method for this alert; the dashboard panel is templated across all methods, but this rule deliberately watches only getLatestBlockhash as the representative low-latency probe.",
             "summary": "No provider is clearly winning region {{ $labels.region }} for getLatestBlockhash",
             "description": "The leading provider's win-rate in region {{ $labels.region }} has dropped below 95% (currently {{ printf \"%.1f\" $values.B.Value }}%). Provider average latencies have converged, indicating a regression for the previously dominant provider or a regional issue. Inspect the 'Win % by provider per region' dashboard panel."
           },
