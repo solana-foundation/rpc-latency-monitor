@@ -1,0 +1,61 @@
+{
+  "uid": "rpc-provider-down",
+  "title": "RPC provider down",
+  "condition": "C",
+  "for": "5m",
+  "orgID": 1,
+  "ruleGroup": "rpc-latency-monitor",
+  "folderUID": "${GRAFANA_FOLDER_UID}",
+  "noDataState": "NoData",
+  "execErrState": "Error",
+  "labels": {
+    "severity": "critical",
+    "service": "rpc-latency-monitor"
+  },
+  "annotations": {
+    "summary": "Provider {{ $labels.provider }} ({{ $labels.region }}) is reporting down",
+    "description": "rpc_up == 0 for provider {{ $labels.provider }} in region {{ $labels.region }} for at least 5m. The last RPC check against this provider failed; it is not serving successful reads from this region.",
+    "runbook": "Check provider status and credentials. Cross-check rpc_requests_total error_kind for this provider/region to distinguish auth, timeout, and transport failures."
+  },
+  "data": [
+    {
+      "refId": "A",
+      "relativeTimeRange": { "from": 300, "to": 0 },
+      "datasourceUid": "${GRAFANA_DATASOURCE_UID}",
+      "model": {
+        "refId": "A",
+        "datasource": { "type": "prometheus", "uid": "${GRAFANA_DATASOURCE_UID}" },
+        "expr": "min by (provider, region) (rpc_up)",
+        "instant": true,
+        "intervalMs": 1000,
+        "maxDataPoints": 43200
+      }
+    },
+    {
+      "refId": "B",
+      "datasourceUid": "__expr__",
+      "model": {
+        "refId": "B",
+        "type": "reduce",
+        "datasource": { "type": "__expr__", "uid": "__expr__" },
+        "expression": "A",
+        "reducer": "last"
+      }
+    },
+    {
+      "refId": "C",
+      "datasourceUid": "__expr__",
+      "model": {
+        "refId": "C",
+        "type": "threshold",
+        "datasource": { "type": "__expr__", "uid": "__expr__" },
+        "expression": "B",
+        "conditions": [
+          {
+            "evaluator": { "type": "lt", "params": [1] }
+          }
+        ]
+      }
+    }
+  ]
+}

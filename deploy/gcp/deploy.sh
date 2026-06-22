@@ -31,6 +31,43 @@ push_dashboards() {
       -d "$payload" >/dev/null
     echo "pushed dashboard $(basename "$f")"
   done
+  push_alerts
+}
+
+# Upsert Grafana alert rules (alerting as code) from grafana/alerts/*.json.
+# Placeholders in the JSON are substituted from existing Grafana env vars; no new
+# secrets are introduced. ${GRAFANA_DATASOURCE_UID} defaults to "prometheus".
+push_alerts() {
+  : "${GRAFANA_API_URL:?set via Doppler}"
+  : "${GRAFANA_API_TOKEN:?set via Doppler}"
+  echo "::add-mask::$GRAFANA_API_TOKEN" 2>/dev/null || true
+  local ds_uid="${GRAFANA_DATASOURCE_UID:-prometheus}"
+  local folder_uid="${GRAFANA_FOLDER_UID:-}"
+  for f in "$REPO_ROOT"/grafana/alerts/*.json; do
+    [ -e "$f" ] || continue
+    local uid payload
+    uid="$(jq -r '.uid' "$f")"
+    payload="$(jq \
+      --arg ds "$ds_uid" \
+      --arg folder "$folder_uid" \
+      'walk(if type == "string" then
+              gsub("\\$\\{GRAFANA_DATASOURCE_UID\\}"; $ds)
+              | gsub("\\$\\{GRAFANA_FOLDER_UID\\}"; $folder)
+            else . end)' "$f")"
+    # Upsert: update by UID, falling back to create when it does not exist yet.
+    if ! curl -sS --fail-with-body -X PUT "$GRAFANA_API_URL/api/v1/provisioning/alert-rules/$uid" \
+        -H "Authorization: Bearer $GRAFANA_API_TOKEN" \
+        -H "Content-Type: application/json" \
+        -H "X-Disable-Provenance: true" \
+        -d "$payload" >/dev/null 2>&1; then
+      curl -sS --fail-with-body -X POST "$GRAFANA_API_URL/api/v1/provisioning/alert-rules" \
+        -H "Authorization: Bearer $GRAFANA_API_TOKEN" \
+        -H "Content-Type: application/json" \
+        -H "X-Disable-Provenance: true" \
+        -d "$payload" >/dev/null
+    fi
+    echo "pushed alert rule $(basename "$f")"
+  done
 }
 
 deploy_gcp() {

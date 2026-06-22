@@ -58,7 +58,9 @@ Multi-region on GCP: one small VM per region (Terraform, `deploy/gcp/`), each ta
 running the monitor plus an Alloy agent that ships metrics to Grafana Cloud. See `deploy/gcp/README` once
 that increment lands.
 
-Grafana Cloud stack: https://rpclatency.grafana.net. Import `grafana/dashboard.json` there, and grab the
+Grafana Cloud stack: https://rpclatency.grafana.net. Dashboards (`grafana/*.json`) and alert rules
+(`grafana/alerts/*.json`, see [`grafana/alerts/README.md`](./grafana/alerts/README.md)) are pushed by the
+deployer (`TARGET=grafana`). Grab the
 Prometheus `remote_write` URL + token from
 https://rpclatency.grafana.net/connections/add-new-connection/ into the `GRAFANA_CLOUD_*` env vars that
 `grafana/alloy-config.alloy` reads.

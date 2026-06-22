@@ -1,0 +1,61 @@
+{
+  "uid": "rpc-slot-lag-elevated",
+  "title": "RPC slot lag elevated",
+  "condition": "C",
+  "for": "10m",
+  "orgID": 1,
+  "ruleGroup": "rpc-latency-monitor",
+  "folderUID": "${GRAFANA_FOLDER_UID}",
+  "noDataState": "NoData",
+  "execErrState": "Error",
+  "labels": {
+    "severity": "warning",
+    "service": "rpc-latency-monitor"
+  },
+  "annotations": {
+    "summary": "Provider {{ $labels.provider }} ({{ $labels.region }}) slot lag elevated",
+    "description": "rpc_slot_lag for provider {{ $labels.provider }} in region {{ $labels.region }} has averaged above 150 slots (~60s behind the observed chain tip) for at least 10m. The provider is serving stale reads relative to the max-observed tip.",
+    "runbook": "Confirm against the slot-lag dashboard panel. Sustained lag points to provider-side replication delay; transient spikes during congestion are expected."
+  },
+  "data": [
+    {
+      "refId": "A",
+      "relativeTimeRange": { "from": 600, "to": 0 },
+      "datasourceUid": "${GRAFANA_DATASOURCE_UID}",
+      "model": {
+        "refId": "A",
+        "datasource": { "type": "prometheus", "uid": "${GRAFANA_DATASOURCE_UID}" },
+        "expr": "max by (provider, region) (avg_over_time(rpc_slot_lag[5m]))",
+        "instant": true,
+        "intervalMs": 1000,
+        "maxDataPoints": 43200
+      }
+    },
+    {
+      "refId": "B",
+      "datasourceUid": "__expr__",
+      "model": {
+        "refId": "B",
+        "type": "reduce",
+        "datasource": { "type": "__expr__", "uid": "__expr__" },
+        "expression": "A",
+        "reducer": "last"
+      }
+    },
+    {
+      "refId": "C",
+      "datasourceUid": "__expr__",
+      "model": {
+        "refId": "C",
+        "type": "threshold",
+        "datasource": { "type": "__expr__", "uid": "__expr__" },
+        "expression": "B",
+        "conditions": [
+          {
+            "evaluator": { "type": "gt", "params": [150] }
+          }
+        ]
+      }
+    }
+  ]
+}
