@@ -40,7 +40,7 @@
           "editorType": "sql",
           "format": 1,
           "queryType": "table",
-          "rawSql": "SELECT ta.relayer AS provider, count() AS \"Transactions\", round(sum(gt.balance_deltas[acct]) / 1e9, 4) AS \"Total tips (SOL)\", round(sum(gt.fee_sol), 4) AS \"Total fees (SOL)\", round(median(gt.balance_deltas[acct])) AS \"Median tip (lamports)\", round(median(gt.fee_sol) * 1e9) AS \"Median fee (lamports)\" FROM default.geyser_transactions gt ARRAY JOIN arrayConcat(gt.static_unsigned_writable_accounts, gt.loaded_writable_accounts) AS acct INNER JOIN default.tip_accounts ta ON ta.tip_account = acct WHERE gt.is_vote = 0 AND gt.balance_deltas[acct] > 0 AND $__timeFilter(gt.ingested_at) AND ta.relayer IN (${provider:singlequote}) GROUP BY provider ORDER BY count() DESC"
+          "rawSql": "SELECT provider, countMerge(tx_count) AS \"Transactions\", round(sumMerge(total_tips_lamports) / 1e9, 4) AS \"Total tips (SOL)\", round(sumMerge(total_fees_sol), 4) AS \"Total fees (SOL)\", round(quantileMerge(0.5)(tip_quantiles_lamports)) AS \"Median tip (lamports)\", round(quantileMerge(0.5)(fee_quantiles_sol) * 1e9) AS \"Median fee (lamports)\" FROM default.sender_provider_rollup WHERE $__timeFilter(bucket) AND provider IN (${provider:singlequote}) GROUP BY provider ORDER BY countMerge(tx_count) DESC"
         }
       ]
     },
@@ -61,7 +61,7 @@
           "editorType": "sql",
           "format": 1,
           "queryType": "table",
-          "rawSql": "SELECT $__timeInterval(gt.ingested_at) AS time, ta.relayer AS provider, count() AS txs FROM default.geyser_transactions gt ARRAY JOIN arrayConcat(gt.static_unsigned_writable_accounts, gt.loaded_writable_accounts) AS acct INNER JOIN default.tip_accounts ta ON ta.tip_account = acct WHERE gt.is_vote = 0 AND gt.balance_deltas[acct] > 0 AND $__timeFilter(gt.ingested_at) AND ta.relayer IN (${provider:singlequote}) GROUP BY time, provider ORDER BY time"
+          "rawSql": "SELECT $__timeInterval(bucket) AS time, provider, countMerge(tx_count) AS txs FROM default.sender_provider_rollup WHERE $__timeFilter(bucket) AND provider IN (${provider:singlequote}) GROUP BY time, provider ORDER BY time"
         }
       ]
     },
@@ -80,7 +80,7 @@
           "editorType": "sql",
           "format": 1,
           "queryType": "table",
-          "rawSql": "SELECT ta.relayer AS provider, count() AS transactions FROM default.geyser_transactions gt ARRAY JOIN arrayConcat(gt.static_unsigned_writable_accounts, gt.loaded_writable_accounts) AS acct INNER JOIN default.tip_accounts ta ON ta.tip_account = acct WHERE gt.is_vote = 0 AND gt.balance_deltas[acct] > 0 AND $__timeFilter(gt.ingested_at) AND ta.relayer IN (${provider:singlequote}) GROUP BY provider ORDER BY transactions DESC"
+          "rawSql": "SELECT provider, countMerge(tx_count) AS transactions FROM default.sender_provider_rollup WHERE $__timeFilter(bucket) AND provider IN (${provider:singlequote}) GROUP BY provider ORDER BY transactions DESC"
         }
       ]
     },
@@ -99,7 +99,7 @@
           "editorType": "sql",
           "format": 1,
           "queryType": "table",
-          "rawSql": "SELECT ta.relayer AS provider, round(sum(gt.balance_deltas[acct]) / 1e9, 4) AS total_tips_sol FROM default.geyser_transactions gt ARRAY JOIN arrayConcat(gt.static_unsigned_writable_accounts, gt.loaded_writable_accounts) AS acct INNER JOIN default.tip_accounts ta ON ta.tip_account = acct WHERE gt.is_vote = 0 AND gt.balance_deltas[acct] > 0 AND $__timeFilter(gt.ingested_at) AND ta.relayer IN (${provider:singlequote}) GROUP BY provider ORDER BY total_tips_sol DESC"
+          "rawSql": "SELECT provider, round(sumMerge(total_tips_lamports) / 1e9, 4) AS total_tips_sol FROM default.sender_provider_rollup WHERE $__timeFilter(bucket) AND provider IN (${provider:singlequote}) GROUP BY provider ORDER BY total_tips_sol DESC"
         }
       ]
     },
@@ -118,7 +118,7 @@
           "editorType": "sql",
           "format": 1,
           "queryType": "table",
-          "rawSql": "SELECT ta.relayer AS provider, round(sum(gt.fee_sol), 4) AS total_fees_sol FROM default.geyser_transactions gt ARRAY JOIN arrayConcat(gt.static_unsigned_writable_accounts, gt.loaded_writable_accounts) AS acct INNER JOIN default.tip_accounts ta ON ta.tip_account = acct WHERE gt.is_vote = 0 AND gt.balance_deltas[acct] > 0 AND $__timeFilter(gt.ingested_at) AND ta.relayer IN (${provider:singlequote}) GROUP BY provider ORDER BY total_fees_sol DESC"
+          "rawSql": "SELECT provider, round(sumMerge(total_fees_sol), 4) AS total_fees_sol FROM default.sender_provider_rollup WHERE $__timeFilter(bucket) AND provider IN (${provider:singlequote}) GROUP BY provider ORDER BY total_fees_sol DESC"
         }
       ]
     }
