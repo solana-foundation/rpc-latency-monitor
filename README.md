@@ -48,9 +48,8 @@ loop. Metrics are exposed in Prometheus text format on a local `/metrics` endpoi
 Grafana Cloud.
 
 ```
-                Region: us-east4              Region: europe-west2          Region: asia-northeast1
+                  Region A                      Region B                      Region C
             ┌──────────────────────┐      ┌──────────────────────┐      ┌──────────────────────┐
-            │  GCP VM (COS)        │      │  GCP VM (COS)        │      │  GCP VM (COS)        │
             │                      │      │                      │      │                      │
    probes   │  rpc-latency-monitor │      │  rpc-latency-monitor │      │  rpc-latency-monitor │
   ┌──────┐  │   │  :9464/metrics   │      │   │  :9464/metrics   │      │   │  :9464/metrics   │
@@ -101,9 +100,7 @@ curl localhost:9464/metrics
 ```
 
 Secrets are kept out of the config file: provider URLs use `${ENV_VAR}` placeholders that are
-resolved from the environment at startup, and the URLs are redacted in logs. In deployed
-environments those values come from [Doppler](https://www.doppler.com/); locally a `.env` is the
-fallback.
+resolved from the environment at startup, and the URLs are redacted in logs.
 
 Or bring up the full local stack (monitor + Prometheus + Grafana, dashboard auto-provisioned at
 <http://localhost:3000>):
@@ -120,7 +117,7 @@ Full reference: [`config.example.yaml`](./config.example.yaml). Durations accept
 
 | Key | Description |
 | --- | --- |
-| `region` | This instance's region tag, applied as a label to every metric. On GCP it is overridden by `MONITOR_REGION`, derived from the VM's zone metadata. |
+| `region` | This instance's region tag, applied as a label to every metric. Can be overridden at runtime by the `MONITOR_REGION` environment variable. |
 | `server.bind` | Address for the Prometheus `/metrics` and `/health` endpoints (default `0.0.0.0:9464`). In production, bind to `127.0.0.1` so only the local Alloy agent can scrape. |
 | `reference_slot.source` | `max_observed` (neutral; highest `processed` slot seen across providers) or `endpoint` (poll a dedicated RPC). |
 | `reference_slot.endpoint` / `poll_interval` | Optional dedicated endpoint and poll cadence, required when `source: endpoint`. |
@@ -162,57 +159,19 @@ to either the config value or the raw JSON-RPC name:
 
 ### Regions
 
-Regions are defined for deployment in Terraform's `locations` map (region label → zone). The default
-fleet spans North America, Europe, and Asia:
-
-```
-us-east4   us-west2   europe-west2   europe-west3
-asia-northeast3   asia-northeast1   asia-southeast1
-```
-
-Add or remove vantage points by editing the `locations` map in
-[`deploy/gcp/terraform/variables.tf`](./deploy/gcp/terraform/variables.tf).
+Each running instance tags its metrics with a `region` label, so the same checks can be compared
+across vantage points. A typical fleet spans North America, Europe, and Asia. Adding or removing a
+vantage point is purely a matter of running another instance with a different `region` value — no
+code changes required.
 
 ## Deployment
 
-Multi-region on GCP: one small Container-Optimized OS VM per region (`e2-small` by default), each
-labeled with its region and running the monitor plus an Alloy agent. See
-[`deploy/gcp/README.md`](./deploy/gcp/README.md) for the standalone Terraform flow.
-
-The CI/CD pipeline ([`.github/workflows/deploy.yml`](./.github/workflows/deploy.yml)) runs on push
-to `main` (or via manual dispatch with a `gcp` / `grafana` / `all` target):
-
-```
-push to main
-   │
-   ▼
-verify (cargo fmt --check · clippy -D warnings · test)
-   │
-   ▼
-authenticate to GCP via Workload Identity Federation (WIF, no static keys)
-   │
-   ▼
-Cloud Build → container image pushed to Artifact Registry  (deploy/cloudbuild.yaml)
-   │
-   ▼
-terraform apply  → reconcile the per-region VM fleet        (deploy/gcp/terraform)
-   │
-   ▼
-staggered VM reset  → reset one VM at a time (RESET_DELAY between each)
-                      so vantage points roll without a fleet-wide gap
-   │
-   ▼
-Slack notifications: started / succeeded / failed
-```
-
-Secrets (provider keys, Grafana Cloud `remote_write` credentials, the VM Doppler token) are sourced
-from Doppler at deploy time and pulled on the VM at boot — Terraform only ever sees a single Doppler
-service token.
+The monitor runs as one lightweight container per region, each exporting Prometheus metrics that are
+scraped locally and forwarded to Grafana Cloud.
 
 ## Dashboards
 
-Dashboards live in [`grafana/`](./grafana) and are pushed to Grafana Cloud as part of a deploy (the
-`grafana` / `all` targets). The primary board, **RPC Latency Monitor**
+Dashboards live in [`grafana/`](./grafana). The primary board, **RPC Latency Monitor**
 ([`grafana/dashboard.json`](./grafana/dashboard.json)), has panels for:
 
 - **p99 latency by provider** (templated by `$method`)
