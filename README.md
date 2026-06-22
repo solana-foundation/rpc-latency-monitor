@@ -32,7 +32,7 @@ each request, and records:
 | `rpc_latency_seconds` | histogram | Wall-clock round-trip latency, labeled by `provider`, `method`, `status`. |
 | `rpc_slot_lag` | gauge | How many slots a provider trails the observed chain tip, by `provider`, `method`. |
 | `rpc_requests_total` | counter | Request outcomes by `provider`, `method`, `status`, `error_kind`. |
-| `rpc_up` | gauge | Whether a provider's most recent check succeeded. |
+| `rpc_up` | gauge | Whether a provider's most recent check succeeded. Labeled by `provider` only (no `method`), so every check writes the same series and the value is last-writer-wins across methods — treat it as a coarse per-provider liveness signal, not per-method. |
 
 Every series also carries a `region` label so latency can be compared from each vantage point.
 
@@ -144,18 +144,21 @@ providers:
 
 ### Checks
 
-The read methods currently supported (the `method:` value, mapped to its JSON-RPC call):
+The read methods currently supported, showing each config `method:` value, its JSON-RPC call,
+and the Prometheus `method` **label** emitted for it. Query Grafana/PromQL with the label form
+(e.g. `rpc_latency_seconds{method="getBlock_recent"}`), which is camelCase and not always equal
+to either the config value or the raw JSON-RPC name:
 
-| Check | JSON-RPC call | Notes |
-| --- | --- | --- |
-| `get_health` | `getHealth` | Liveness only. |
-| `get_slot` | `getSlot` | `processed` commitment; feeds the reference tip. |
-| `get_latest_blockhash` | `getLatestBlockhash` | `processed`; reports context slot. |
-| `get_account_info` | `getAccountInfo` | System program account, `processed`. |
-| `get_program_accounts` | `getProgramAccounts` | Token-program GPA with `memcmp` + `dataSlice` filters. |
-| `get_block_recent` | `getBlock` | A recent block at a fixed confirmation depth behind the tip. |
-| `get_transaction_recent` | `getTransaction` | A signature freshly discovered by `get_signatures_for_address`. |
-| `get_signatures_for_address` | `getSignaturesForAddress` | High-traffic address; seeds `get_transaction_recent`. |
+| Check (`method:` value) | JSON-RPC call | Prometheus `method` label | Notes |
+| --- | --- | --- | --- |
+| `get_health` | `getHealth` | `getHealth` | Liveness only. |
+| `get_slot` | `getSlot` | `getSlot` | `processed` commitment; feeds the reference tip. |
+| `get_latest_blockhash` | `getLatestBlockhash` | `getLatestBlockhash` | `processed`; reports context slot. |
+| `get_account_info` | `getAccountInfo` | `getAccountInfo` | System program account, `processed`. |
+| `get_program_accounts` | `getProgramAccounts` | `getProgramAccounts` | Token-program GPA with `memcmp` + `dataSlice` filters. |
+| `get_block_recent` | `getBlock` | `getBlock_recent` | A recent block at a fixed confirmation depth behind the tip. |
+| `get_transaction_recent` | `getTransaction` | `getTransaction_recent` | A signature freshly discovered by `get_signatures_for_address`. |
+| `get_signatures_for_address` | `getSignaturesForAddress` | `getSignaturesForAddress` | High-traffic address; seeds `get_transaction_recent`. |
 
 ### Regions
 
