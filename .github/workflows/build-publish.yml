@@ -1,0 +1,98 @@
+name: Build & Publish
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'deploy/Dockerfile'
+      - 'deploy/cloudbuild.yaml'
+      - 'grafana/**'
+      - '.github/workflows/build-publish.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: build-publish
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: Verify (fmt, clippy, test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+      - run: cargo fmt --all --check
+      - run: cargo clippy --all-targets --all-features -- -D warnings
+      - run: cargo test --all-features
+
+  publish:
+    name: Build image + push dashboards
+    needs: verify
+    runs-on: ubuntu-latest
+    environment: prod
+    env:
+      DOPPLER_PROJECT: rpc-latency-monitor
+      DOPPLER_CONFIG: prd
+      REGION: us-east4
+    steps:
+      - uses: actions/checkout@v4
+      - uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - uses: dopplerhq/cli-action@v3
+
+      - name: Build + publish image to Artifact Registry
+        env:
+          PROJECT: ${{ vars.GCP_PROJECT_ID }}
+        run: |
+          set -euo pipefail
+          SHA="$(git rev-parse --short HEAD)"
+          BASE="${REGION}-docker.pkg.dev/${PROJECT}/rpc-latency-monitor/rpc-latency-monitor"
+          gcloud builds submit . --project "$PROJECT" \
+            --config deploy/cloudbuild.yaml \
+            --substitutions=_IMAGE="${BASE}:${SHA}" --suppress-logs
+          gcloud artifacts docker tags add "${BASE}:${SHA}" "${BASE}:latest" --quiet
+          echo "published ${BASE}:${SHA} (+ :latest)"
+
+      - name: Push dashboards to Grafana Cloud
+        env:
+          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN }}
+        run: |
+          set -euo pipefail
+          doppler run --project "$DOPPLER_PROJECT" --config "$DOPPLER_CONFIG" -- bash -euo pipefail -c '
+            echo "::add-mask::$GRAFANA_API_TOKEN"
+            for f in grafana/*.json; do
+              payload="$(jq -n --slurpfile d "$f" --arg folder "${GRAFANA_FOLDER_UID:-}" \
+                "{dashboard: (\$d[0] + {id: null}), folderUid: \$folder, overwrite: true}")"
+              curl -sS --fail-with-body -X POST "$GRAFANA_API_URL/api/dashboards/db" \
+                -H "Authorization: Bearer $GRAFANA_API_TOKEN" -H "Content-Type: application/json" \
+                -d "$payload" >/dev/null
+              echo "pushed dashboard $(basename "$f")"
+            done'
+
+      - name: Trigger ops deploy
+        env:
+          OPS_TOKEN: ${{ secrets.OPS_DISPATCH_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${OPS_TOKEN:-}" ]; then
+            echo "::notice::OPS_DISPATCH_TOKEN not set — trigger the deploy in rpc-latency-monitor-ops manually"
+            exit 0
+          fi
+          curl -sS --fail-with-body -X POST \
+            -H "Authorization: Bearer $OPS_TOKEN" -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/solana-foundation/rpc-latency-monitor-ops/dispatches \
+            -d '{"event_type":"deploy"}'
+          echo "dispatched deploy to rpc-latency-monitor-ops"

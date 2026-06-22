@@ -131,11 +131,11 @@ file. A few of the rules reference the public hostname and the dashboard path pr
 
 This is **already the case** and must stay that way — no public path exists to the raw metrics:
 
-- In production (`deploy/gcp/config.yaml`) the server binds `127.0.0.1:9464`, so `/metrics` is reachable
+- In production (the `rpc-latency-monitor-ops` repo) the server binds `127.0.0.1:9464`, so `/metrics` is reachable
   only from the VM itself.
 - The co-located Alloy agent (`grafana/alloy-config.alloy`) scrapes `127.0.0.1:9464` and `remote_write`s
   to Grafana Cloud over an authenticated endpoint. Nothing scrapes the VM from outside.
-- No GCP firewall rule opens `9464` (`deploy/gcp/terraform/`), and there is no load balancer or public IP
+- No GCP firewall rule opens `9464` (the `rpc-latency-monitor-ops` repo), and there is no load balancer or public IP
   mapping for that port.
 
 Guardrails to keep it that way:
@@ -169,5 +169,5 @@ Guardrails to keep it that way:
 
 - `grafana/dashboard.json` — the dashboard to publish.
 - `grafana/alloy-config.alloy` — local scrape + authenticated remote_write (the only egress of metrics).
-- `deploy/gcp/config.yaml` — production bind `127.0.0.1:9464`.
+- the `rpc-latency-monitor-ops` repo — production bind `127.0.0.1:9464`.
 - `deploy/cloudflare/waf-rules.json` — Cloudflare WAF / rate-limit / cache rules (apply by ops).
