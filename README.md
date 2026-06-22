@@ -63,6 +63,11 @@ Prometheus `remote_write` URL + token from
 https://rpclatency.grafana.net/connections/add-new-connection/ into the `GRAFANA_CLOUD_*` env vars that
 `grafana/alloy-config.alloy` reads.
 
+Publishing the dashboard publicly (read-only share or snapshot, fronted by Cloudflare, with `/metrics`
+kept localhost-only): see [`docs/public-hardening.md`](./docs/public-hardening.md) and the committable
+Cloudflare WAF / rate-limit / cache rules in [`deploy/cloudflare/waf-rules.json`](./deploy/cloudflare/waf-rules.json).
+None of this flips anything public on its own.
+
 ## License
 
 Apache-2.0. See [LICENSE](./LICENSE).

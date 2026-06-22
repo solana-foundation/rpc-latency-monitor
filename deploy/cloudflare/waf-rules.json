@@ -1,0 +1,93 @@
+{
+  "_about": "Cloudflare edge config for the (future) PUBLIC rpc-latency dashboard. See docs/public-hardening.md.",
+  "_status": "NOT applied by anything in this repo. An operator (or Terraform cloudflare_ruleset) applies these to the public zone deliberately. Nothing here flips anything public.",
+  "_placeholders": {
+    "DASHBOARD_HOSTNAME": "friendly public hostname, e.g. rpclatency.solana.org (set by ops at apply time)",
+    "DASHBOARD_PATH_PREFIX": "/public-dashboards/ for a Grafana public dashboard (Option A); adjust for snapshots"
+  },
+  "_apply": {
+    "http_request_firewall_custom": "PUT /zones/{zone_id}/rulesets/phases/http_request_firewall_custom/entrypoint  body: { \"rules\": <waf_custom_rules.rules> }",
+    "http_ratelimit": "PUT /zones/{zone_id}/rulesets/phases/http_ratelimit/entrypoint  body: { \"rules\": <rate_limit_rules.rules> }",
+    "http_request_cache_settings": "PUT /zones/{zone_id}/rulesets/phases/http_request_cache_settings/entrypoint  body: { \"rules\": <cache_rules.rules> }",
+    "managed_ruleset": "Also enable the Cloudflare Managed Ruleset and Bot Fight Mode in the dashboard / via API (see _bot_mitigation).",
+    "note": "Apply each phase's rules in a single PUT. Replace placeholders first."
+  },
+
+  "waf_custom_rules": {
+    "name": "rpc-latency public dashboard WAF",
+    "kind": "zone",
+    "phase": "http_request_firewall_custom",
+    "rules": [
+      {
+        "description": "Allow only safe read methods to the public dashboard host",
+        "expression": "(http.host eq \"DASHBOARD_HOSTNAME\") and not (http.request.method in {\"GET\" \"HEAD\" \"OPTIONS\"})",
+        "action": "block"
+      },
+      {
+        "description": "Block Grafana API / admin / auth / datasource paths from the public host",
+        "expression": "(http.host eq \"DASHBOARD_HOSTNAME\") and (starts_with(http.request.uri.path, \"/api/\") or starts_with(http.request.uri.path, \"/admin/\") or starts_with(http.request.uri.path, \"/login\") or starts_with(http.request.uri.path, \"/logout\") or starts_with(http.request.uri.path, \"/explore\") or starts_with(http.request.uri.path, \"/datasources\") or starts_with(http.request.uri.path, \"/d/\") or starts_with(http.request.uri.path, \"/dashboards\"))",
+        "action": "block"
+      },
+      {
+        "description": "Block any request to the raw metrics path at the edge (defense in depth; /metrics is localhost-only on the origin)",
+        "expression": "(http.host eq \"DASHBOARD_HOSTNAME\") and (http.request.uri.path eq \"/metrics\")",
+        "action": "block"
+      },
+      {
+        "description": "Challenge automated/unverified bots while allowing verified good bots",
+        "expression": "(http.host eq \"DASHBOARD_HOSTNAME\") and (cf.client.bot) and not (cf.verified_bot_category in {\"Search Engine Crawler\" \"Monitoring & Analytics\"})",
+        "action": "managed_challenge"
+      }
+    ]
+  },
+
+  "rate_limit_rules": {
+    "name": "rpc-latency public dashboard rate limit",
+    "kind": "zone",
+    "phase": "http_ratelimit",
+    "rules": [
+      {
+        "description": "Per-IP rate limit on the public dashboard host",
+        "expression": "(http.host eq \"DASHBOARD_HOSTNAME\")",
+        "action": "block",
+        "ratelimit": {
+          "characteristics": ["cf.colo.id", "ip.src"],
+          "period": 60,
+          "requests_per_period": 120,
+          "mitigation_timeout": 600,
+          "counting_expression": "(http.host eq \"DASHBOARD_HOSTNAME\")"
+        }
+      }
+    ]
+  },
+
+  "cache_rules": {
+    "name": "rpc-latency public dashboard cache",
+    "kind": "zone",
+    "phase": "http_request_cache_settings",
+    "rules": [
+      {
+        "description": "Edge-cache dashboard responses briefly so viewer bursts collapse to a single origin fetch",
+        "expression": "(http.host eq \"DASHBOARD_HOSTNAME\") and (starts_with(http.request.uri.path, \"DASHBOARD_PATH_PREFIX\") or starts_with(http.request.uri.path, \"/public/\") or starts_with(http.request.uri.path, \"/avatar/\"))",
+        "action": "set_cache_settings",
+        "action_parameters": {
+          "cache": true,
+          "edge_ttl": {
+            "mode": "override_origin",
+            "default": 60
+          },
+          "browser_ttl": {
+            "mode": "override_origin",
+            "default": 30
+          }
+        }
+      }
+    ]
+  },
+
+  "_bot_mitigation": {
+    "bot_fight_mode": "Enable Bot Fight Mode (or Super Bot Fight Mode on Pro+). On Pro+, set verified-bots = allow, definitely-automated = managed_challenge.",
+    "managed_ruleset": "Enable the Cloudflare Managed Ruleset (and OWASP Core Ruleset if on a plan that includes it) on this zone.",
+    "tls": "SSL/TLS mode Full (strict); enable Always Use HTTPS and HSTS on the hostname."
+  }
+}
