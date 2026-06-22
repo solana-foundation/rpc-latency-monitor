@@ -1,34 +1,27 @@
 # Grafana alerting as code
 
-Alert rules for the RPC latency monitor, stored as JSON in Grafana's alert-rule
-provisioning format (one file per rule). They are upserted into the Grafana Cloud
-stack via the provisioning API by the deployer — see "Deployment" below.
+A single alert rule for the RPC latency monitor, stored as JSON in Grafana's
+`apiVersion 1` alert-rule groups provisioning format (`monitor-data.json`). It is
+upserted into the Grafana Cloud stack via the provisioning API by the deployer —
+see "Deployment" below.
 
-Each rule evaluates a Prometheus query (`refId: A`) against the metrics the monitor
-exports, reduces it to the latest value (`refId: B`), and fires when the threshold
-condition (`refId: C`) holds for the rule's `for` duration. Rules are grouped under
-`ruleGroup: rpc-latency-monitor` and labeled `service: rpc-latency-monitor`.
+The monitor only needs one thing to be true: the dashboards are up and showing
+data. We intentionally do **not** alert on any individual provider being down,
+slow, or losing — only on the metrics pipeline going dark.
 
-## Rules
+## Rule
 
 | File | Severity | Fires when |
 | --- | --- | --- |
-| `provider-down.json` | critical | `min by (provider, region) (rpc_up) < 1` for 5m |
-| `slot-lag-elevated.json` | warning | `avg_over_time(rpc_slot_lag[5m]) > 150` slots per provider/region for 10m |
-| `success-rate-dropping.json` | warning | success ratio from `rpc_requests_total` `< 0.95` per provider/region for 10m |
+| `monitor-data.json` | critical | `count(rpc_up) < 1` (no series at all) for 10m |
 
-- **Provider down** — `rpc_up` is `1` on a successful check and `0` on failure. The
-  rule takes the `min` per provider/region so any failing region trips it. A 5m `for`
-  window rides out single transient check failures. Uses `noDataState: Alerting` (the
-  other rules use `NoData`) so that total scrape loss — the VM down, a region offline,
-  or `rpc_up` series disappearing entirely — pages rather than going silently to NoData.
-- **Slot lag elevated** — `rpc_slot_lag` is how far a provider's reported slot trails
-  the max-observed chain tip. 150 slots is roughly 60s behind. Smoothed with a 5m
-  average so brief congestion spikes don't alert.
-- **Success rate dropping** — derived from the `rpc_requests_total` counter as
-  `rate(status="success") / rate(total)` per provider/region over 10m. `clamp_min`
-  on the denominator avoids divide-by-zero when a provider stops being scraped (that
-  case is covered by the provider-down rule instead).
+- **rpc-latency monitor not reporting (dashboard has no data)** — query `A` is
+  `count(rpc_up)` against the Prometheus datasource, reduced to its last value
+  (`refId: B`), and the threshold (`refId: C`) fires when that count `is below 1`.
+  When the monitor VM, the scrape, or remote-write stops, the `rpc_up` series
+  disappear entirely and the dashboards go blank. `noDataState: Alerting` plus a
+  `for: 10m` window means total metric loss pages rather than going silently to
+  NoData, while riding out brief gaps. There are no per-provider labels.
 
 ## Placeholders
 
@@ -37,14 +30,16 @@ existing Grafana env/secret pattern — no new secrets are introduced:
 
 - `${GRAFANA_DATASOURCE_UID}` — UID of the Prometheus datasource in the Grafana stack
   (config, not a secret; defaults to `prometheus` if unset).
-- `${GRAFANA_FOLDER_UID}` — folder the rules live in (reuses the existing
+- `${GRAFANA_FOLDER_UID}` — folder the rule group lives in (reuses the existing
   `GRAFANA_FOLDER_UID` used for dashboards; empty means the General folder).
 
 ## Deployment
 
 `deploy/gcp/deploy.sh` (run via `TARGET=grafana` or `all`) pushes both the dashboards
-(`push_dashboards`) and these alert rules (`push_alerts`) as separate steps. For each
-rule it substitutes the placeholders and
-upserts via `PUT /api/v1/provisioning/alert-rules/{uid}` (falling back to `POST` to
-create), reusing `GRAFANA_API_URL` / `GRAFANA_API_TOKEN`. The `X-Disable-Provenance`
-header keeps the rules editable as provisioned-via-API rather than file-locked.
+(`push_dashboards`) and this alert rule (`push_alerts`) as separate steps. It
+substitutes the placeholders, reshapes the `apiVersion 1` group into the rule-group
+provisioning body, and upserts it via
+`PUT /api/v1/provisioning/folder/{folderUid}/rule-groups/{group}`, reusing
+`GRAFANA_API_URL` / `GRAFANA_API_TOKEN`. The PUT replaces the group's rules so
+re-running the deploy can't create duplicates. The `X-Disable-Provenance` header
+keeps the rule editable as provisioned-via-API rather than file-locked.

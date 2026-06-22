@@ -33,49 +33,50 @@ push_dashboards() {
   done
 }
 
-# Upsert Grafana alert rules (alerting as code) from grafana/alerts/*.json.
-# Placeholders in the JSON are substituted from existing Grafana env vars; no new
-# secrets are introduced. ${GRAFANA_DATASOURCE_UID} defaults to "prometheus".
+# Upsert the Grafana alert rule group (alerting as code) from
+# grafana/alerts/monitor-data.json. The file is in Grafana's apiVersion 1 groups
+# provisioning format and holds a single data-presence rule. Placeholders in the
+# JSON are substituted from existing Grafana env vars; no new secrets are
+# introduced. ${GRAFANA_DATASOURCE_UID} defaults to "prometheus".
 push_alerts() {
   : "${GRAFANA_API_URL:?set via Doppler}"
   : "${GRAFANA_API_TOKEN:?set via Doppler}"
   echo "::add-mask::$GRAFANA_API_TOKEN" 2>/dev/null || true
   local ds_uid="${GRAFANA_DATASOURCE_UID:-prometheus}"
   local folder_uid="${GRAFANA_FOLDER_UID:-}"
-  for f in "$REPO_ROOT"/grafana/alerts/*.json; do
-    [ -e "$f" ] || continue
-    local uid payload
-    uid="$(jq -r '.uid' "$f")"
-    payload="$(jq \
-      --arg ds "$ds_uid" \
-      --arg folder "$folder_uid" \
-      'walk(if type == "string" then
-              gsub("\\$\\{GRAFANA_DATASOURCE_UID\\}"; $ds)
-              | gsub("\\$\\{GRAFANA_FOLDER_UID\\}"; $folder)
-            else . end)' "$f")"
-    # Upsert: update by UID, falling back to create only when the rule does not
-    # exist yet (404). Any other PUT failure (400/401/403/5xx) is surfaced and
-    # hard-fails so a transient error can't silently create a duplicate rule.
-    local put_body put_code
-    put_body="$(curl -sS -w '\n%{http_code}' -X PUT "$GRAFANA_API_URL/api/v1/provisioning/alert-rules/$uid" \
-      -H "Authorization: Bearer $GRAFANA_API_TOKEN" \
-      -H "Content-Type: application/json" \
-      -H "X-Disable-Provenance: true" \
-      -d "$payload")"
-    put_code="${put_body##*$'\n'}"
-    put_body="${put_body%$'\n'*}"
-    if [ "$put_code" = "404" ]; then
-      curl -sS --fail-with-body -X POST "$GRAFANA_API_URL/api/v1/provisioning/alert-rules" \
-        -H "Authorization: Bearer $GRAFANA_API_TOKEN" \
-        -H "Content-Type: application/json" \
-        -H "X-Disable-Provenance: true" \
-        -d "$payload" >/dev/null
-    elif [ "$put_code" -lt 200 ] || [ "$put_code" -ge 300 ]; then
-      echo "failed to upsert alert rule $(basename "$f") (HTTP $put_code): $put_body" >&2
-      exit 1
-    fi
-    echo "pushed alert rule $(basename "$f")"
-  done
+  local f="$REPO_ROOT/grafana/alerts/monitor-data.json"
+  [ -e "$f" ] || { echo "missing alert rule file: $f" >&2; exit 1; }
+
+  # Substitute placeholders, then reshape the apiVersion 1 group into the rule-group
+  # provisioning API body ({ name, interval, rules }). interval is sent in seconds.
+  local resolved group_name payload
+  resolved="$(jq \
+    --arg ds "$ds_uid" \
+    --arg folder "$folder_uid" \
+    'walk(if type == "string" then
+            gsub("\\$\\{GRAFANA_DATASOURCE_UID\\}"; $ds)
+            | gsub("\\$\\{GRAFANA_FOLDER_UID\\}"; $folder)
+          else . end)' "$f")"
+  group_name="$(jq -r '.groups[0].name' <<<"$resolved")"
+  payload="$(jq '.groups[0]
+    | {title: .name, interval: 60, rules: .rules}' <<<"$resolved")"
+
+  # Upsert the whole group by name under the target folder. This PUT is idempotent
+  # and replaces the group's rules, so re-running deploy can't create duplicates.
+  local put_body put_code
+  put_body="$(curl -sS -w '\n%{http_code}' -X PUT \
+    "$GRAFANA_API_URL/api/v1/provisioning/folder/$folder_uid/rule-groups/$group_name" \
+    -H "Authorization: Bearer $GRAFANA_API_TOKEN" \
+    -H "Content-Type: application/json" \
+    -H "X-Disable-Provenance: true" \
+    -d "$payload")"
+  put_code="${put_body##*$'\n'}"
+  put_body="${put_body%$'\n'*}"
+  if [ "$put_code" -lt 200 ] || [ "$put_code" -ge 300 ]; then
+    echo "failed to upsert alert rule group $group_name (HTTP $put_code): $put_body" >&2
+    exit 1
+  fi
+  echo "pushed alert rule group $group_name ($(basename "$f"))"
 }
 
 deploy_gcp() {

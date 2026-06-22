@@ -1,0 +1,71 @@
+{
+  "apiVersion": 1,
+  "groups": [
+    {
+      "orgId": 1,
+      "name": "rpc-latency-monitor",
+      "folder": "${GRAFANA_FOLDER_UID}",
+      "interval": "1m",
+      "rules": [
+        {
+          "uid": "rpc-monitor-no-data",
+          "title": "rpc-latency monitor not reporting (dashboard has no data)",
+          "condition": "C",
+          "for": "10m",
+          "noDataState": "Alerting",
+          "execErrState": "Error",
+          "labels": {
+            "severity": "critical",
+            "service": "rpc-latency-monitor"
+          },
+          "annotations": {
+            "summary": "rpc-latency monitor is not reporting any metrics",
+            "description": "No rpc_up series are present over the last 5m, so the RPC latency dashboards have no data to display. The metrics pipeline (monitor VM, scrape, or remote-write) has stopped. This is independent of any individual provider being down or slow.",
+            "runbook": "Check that the monitor VM is running and exporting metrics, that Prometheus/Alloy is scraping and remote-writing successfully, and that the Grafana datasource is healthy. This alert intentionally ignores per-provider health; it fires only when the dashboards would be blank."
+          },
+          "data": [
+            {
+              "refId": "A",
+              "relativeTimeRange": { "from": 300, "to": 0 },
+              "datasourceUid": "${GRAFANA_DATASOURCE_UID}",
+              "model": {
+                "refId": "A",
+                "datasource": { "type": "prometheus", "uid": "${GRAFANA_DATASOURCE_UID}" },
+                "expr": "count(rpc_up)",
+                "instant": true,
+                "intervalMs": 1000,
+                "maxDataPoints": 43200
+              }
+            },
+            {
+              "refId": "B",
+              "datasourceUid": "__expr__",
+              "model": {
+                "refId": "B",
+                "type": "reduce",
+                "datasource": { "type": "__expr__", "uid": "__expr__" },
+                "expression": "A",
+                "reducer": "last"
+              }
+            },
+            {
+              "refId": "C",
+              "datasourceUid": "__expr__",
+              "model": {
+                "refId": "C",
+                "type": "threshold",
+                "datasource": { "type": "__expr__", "uid": "__expr__" },
+                "expression": "B",
+                "conditions": [
+                  {
+                    "evaluator": { "type": "lt", "params": [1] }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
