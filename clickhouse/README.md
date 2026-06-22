@@ -31,10 +31,16 @@ cluster. Hand-off checklist for that team:
    the current `geyser_transactions` / `tip_accounts` schema
    (`balance_deltas`, `fee_sol`, `is_vote`, `static_unsigned_writable_accounts`,
    `loaded_writable_accounts`, `tip_accounts.tip_account`, `tip_accounts.relayer`).
-2. Create the target table and materialized view from the SQL.
+2. Create the target table, then create the materialized view. Immediately
+   record the wall-clock time at MV creation as `<MV_CREATE_TIME>`
+   (e.g. `SELECT now()`); the MV starts capturing rows from that moment on.
 3. (Optional) Run the commented-out backfill `INSERT ... SELECT` once, off-peak,
-   to populate history; the materialized view only captures rows ingested after
-   it is created.
+   to populate history. The MV only captures rows ingested **after** it is
+   created, so bound the backfill with a strict upper limit of
+   `ingested_at < '<MV_CREATE_TIME>'`. Without this bound, any row ingested
+   between MV creation and backfill execution is counted twice (once by the
+   live MV, once by the backfill INSERT). Alternatively, run the backfill
+   *before* creating the MV.
 4. Confirm the `TTL` (30 days) and partitioning are acceptable for the cluster.
 
 ## Files

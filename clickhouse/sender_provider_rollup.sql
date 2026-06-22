@@ -77,6 +77,11 @@ GROUP BY bucket, provider;
 -- run an INSERT SELECT over the existing range. This is a heavy scan over
 -- the raw tables — run off-peak and bound the time range explicitly.
 --
+-- IMPORTANT — avoid double counting: set the upper bound to the timestamp
+-- recorded when the MV was created (<MV_CREATE_TIME>), i.e.
+-- `ingested_at < '<MV_CREATE_TIME>'`. Rows ingested at/after that instant are
+-- already captured by the live MV; including them here counts them twice.
+--
 -- INSERT INTO default.sender_provider_rollup
 -- SELECT
 --     toStartOfMinute(gt.ingested_at)                         AS bucket,
@@ -92,4 +97,5 @@ GROUP BY bucket, provider;
 -- WHERE gt.is_vote = 0
 --   AND gt.balance_deltas[acct] > 0
 --   AND gt.ingested_at >= now() - INTERVAL 30 DAY
+--   AND gt.ingested_at <  '<MV_CREATE_TIME>'   -- exclusive: rows after this are already in the MV
 -- GROUP BY bucket, provider;
