@@ -33,6 +33,52 @@ push_dashboards() {
   done
 }
 
+# Upsert the Grafana alert rule group (alerting as code) from
+# grafana/alerts/monitor-data.json. The file is in Grafana's apiVersion 1 groups
+# provisioning format and holds a single data-presence rule. Placeholders in the
+# JSON are substituted from existing Grafana env vars; no new secrets are
+# introduced. ${GRAFANA_DATASOURCE_UID} defaults to "prometheus".
+push_alerts() {
+  : "${GRAFANA_API_URL:?set via Doppler}"
+  : "${GRAFANA_API_TOKEN:?set via Doppler}"
+  echo "::add-mask::$GRAFANA_API_TOKEN" 2>/dev/null || true
+  local ds_uid="${GRAFANA_DATASOURCE_UID:-prometheus}"
+  local folder_uid="${GRAFANA_FOLDER_UID:-}"
+  local f="$REPO_ROOT/grafana/alerts/monitor-data.json"
+  [ -e "$f" ] || { echo "missing alert rule file: $f" >&2; exit 1; }
+
+  # Substitute placeholders, then reshape the apiVersion 1 group into the rule-group
+  # provisioning API body ({ name, interval, rules }). interval is sent in seconds.
+  local resolved group_name payload
+  resolved="$(jq \
+    --arg ds "$ds_uid" \
+    --arg folder "$folder_uid" \
+    'walk(if type == "string" then
+            gsub("\\$\\{GRAFANA_DATASOURCE_UID\\}"; $ds)
+            | gsub("\\$\\{GRAFANA_FOLDER_UID\\}"; $folder)
+          else . end)' "$f")"
+  group_name="$(jq -r '.groups[0].name' <<<"$resolved")"
+  payload="$(jq '.groups[0]
+    | {title: .name, interval: 60, rules: .rules}' <<<"$resolved")"
+
+  # Upsert the whole group by name under the target folder. This PUT is idempotent
+  # and replaces the group's rules, so re-running deploy can't create duplicates.
+  local put_body put_code
+  put_body="$(curl -sS -w '\n%{http_code}' -X PUT \
+    "$GRAFANA_API_URL/api/v1/provisioning/folder/$folder_uid/rule-groups/$group_name" \
+    -H "Authorization: Bearer $GRAFANA_API_TOKEN" \
+    -H "Content-Type: application/json" \
+    -H "X-Disable-Provenance: true" \
+    -d "$payload")"
+  put_code="${put_body##*$'\n'}"
+  put_body="${put_body%$'\n'*}"
+  if [ "$put_code" -lt 200 ] || [ "$put_code" -ge 300 ]; then
+    echo "failed to upsert alert rule group $group_name (HTTP $put_code): $put_body" >&2
+    exit 1
+  fi
+  echo "pushed alert rule group $group_name ($(basename "$f"))"
+}
+
 deploy_gcp() {
   : "${TF_STATE_BUCKET:?set the GCS bucket holding terraform state}"
   : "${MONITOR_DOPPLER_TOKEN:?VM Doppler service token, set via Doppler}"
@@ -65,9 +111,9 @@ deploy_gcp() {
 }
 
 case "$TARGET" in
-  grafana) push_dashboards ;;
+  grafana) push_dashboards; push_alerts ;;
   gcp) deploy_gcp ;;
-  all) push_dashboards; deploy_gcp ;;
+  all) push_dashboards; push_alerts; deploy_gcp ;;
   *) echo "unknown TARGET: $TARGET (want: all|gcp|grafana)" >&2; exit 1 ;;
 esac
 
