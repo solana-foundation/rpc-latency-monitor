@@ -1,0 +1,72 @@
+{
+  "apiVersion": 1,
+  "groups": [
+    {
+      "orgId": 1,
+      "name": "rpc-win-rate",
+      "folder": "RPC Latency Monitor",
+      "interval": "1m",
+      "rules": [
+        {
+          "uid": "rpc-win-rate-per-region",
+          "title": "RPC provider win-rate below 95% in a region",
+          "condition": "C",
+          "for": "10m",
+          "noDataState": "NoData",
+          "execErrState": "Error",
+          "labels": {
+            "severity": "warning",
+            "team": "rpc"
+          },
+          "annotations": {
+            "summary": "No provider is clearly winning region {{ $labels.region }} for getLatestBlockhash",
+            "description": "The leading provider's win-rate in region {{ $labels.region }} has dropped below 95% (currently {{ printf \"%.1f\" $values.B.Value }}%). Provider average latencies have converged, indicating a regression for the previously dominant provider or a regional issue. Inspect the 'Win % by provider per region' dashboard panel."
+          },
+          "data": [
+            {
+              "refId": "A",
+              "relativeTimeRange": { "from": 600, "to": 0 },
+              "datasourceUid": "prometheus",
+              "model": {
+                "refId": "A",
+                "datasource": { "type": "prometheus", "uid": "prometheus" },
+                "instant": true,
+                "editorMode": "code",
+                "expr": "100 * max by (region) ( avg_over_time( ( (sum by (provider, region) (rate(rpc_latency_seconds_sum{method=\"getLatestBlockhash\"}[5m])) / sum by (provider, region) (rate(rpc_latency_seconds_count{method=\"getLatestBlockhash\"}[5m]))) == bool on (region) group_left() (min by (region) (sum by (provider, region) (rate(rpc_latency_seconds_sum{method=\"getLatestBlockhash\"}[5m])) / sum by (provider, region) (rate(rpc_latency_seconds_count{method=\"getLatestBlockhash\"}[5m])))) )[1h:1m] ) )"
+              }
+            },
+            {
+              "refId": "B",
+              "relativeTimeRange": { "from": 600, "to": 0 },
+              "datasourceUid": "__expr__",
+              "model": {
+                "refId": "B",
+                "type": "reduce",
+                "datasource": { "type": "__expr__", "uid": "__expr__" },
+                "expression": "A",
+                "reducer": "last"
+              }
+            },
+            {
+              "refId": "C",
+              "relativeTimeRange": { "from": 600, "to": 0 },
+              "datasourceUid": "__expr__",
+              "model": {
+                "refId": "C",
+                "type": "threshold",
+                "datasource": { "type": "__expr__", "uid": "__expr__" },
+                "expression": "B",
+                "conditions": [
+                  {
+                    "type": "query",
+                    "evaluator": { "type": "lt", "params": [95] }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
