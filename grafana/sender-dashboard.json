@@ -40,7 +40,7 @@
           "editorType": "sql",
           "format": 1,
           "queryType": "table",
-          "rawSql": "SELECT provider, countMerge(tx_count) AS \"Transactions\", round(sumMerge(total_tips_lamports) / 1e9, 4) AS \"Total tips (SOL)\", round(sumMerge(total_fees_sol), 4) AS \"Total fees (SOL)\", round(quantileMerge(0.5)(tip_quantiles_lamports)) AS \"Median tip (lamports)\", round(quantileMerge(0.5)(fee_quantiles_sol) * 1e9) AS \"Median fee (lamports)\" FROM default.sender_provider_rollup WHERE $__timeFilter(bucket) AND provider IN (${provider:singlequote}) GROUP BY provider ORDER BY countMerge(tx_count) DESC"
+          "rawSql": "SELECT provider, countMerge(txs_state) AS \"Transactions\", round(sumMerge(tips_lamports_state) / 1e9, 4) AS \"Total tips (SOL)\", round(sumMerge(fees_sol_state), 4) AS \"Total fees (SOL)\", round(quantileMerge(0.5)(tip_lamports_median_state)) AS \"Median tip (lamports)\", round(quantileMerge(0.5)(fee_sol_median_state) * 1e9) AS \"Median fee (lamports)\" FROM default.sender_provider_rollup WHERE $__timeFilter(bucket) AND provider IN (${provider:singlequote}) GROUP BY provider ORDER BY countMerge(txs_state) DESC"
         }
       ]
     },
@@ -61,7 +61,7 @@
           "editorType": "sql",
           "format": 1,
           "queryType": "table",
-          "rawSql": "SELECT $__timeInterval(bucket) AS time, provider, countMerge(tx_count) AS txs FROM default.sender_provider_rollup WHERE $__timeFilter(bucket) AND provider IN (${provider:singlequote}) GROUP BY time, provider ORDER BY time"
+          "rawSql": "SELECT $__timeInterval(bucket) AS time, provider, countMerge(txs_state) AS txs FROM default.sender_provider_rollup WHERE $__timeFilter(bucket) AND provider IN (${provider:singlequote}) GROUP BY time, provider ORDER BY time"
         }
       ]
     },
@@ -80,7 +80,7 @@
           "editorType": "sql",
           "format": 1,
           "queryType": "table",
-          "rawSql": "SELECT provider, countMerge(tx_count) AS transactions FROM default.sender_provider_rollup WHERE $__timeFilter(bucket) AND provider IN (${provider:singlequote}) GROUP BY provider ORDER BY transactions DESC"
+          "rawSql": "SELECT provider, countMerge(txs_state) AS transactions FROM default.sender_provider_rollup WHERE $__timeFilter(bucket) AND provider IN (${provider:singlequote}) GROUP BY provider ORDER BY transactions DESC"
         }
       ]
     },
@@ -99,7 +99,7 @@
           "editorType": "sql",
           "format": 1,
           "queryType": "table",
-          "rawSql": "SELECT provider, round(sumMerge(total_tips_lamports) / 1e9, 4) AS total_tips_sol FROM default.sender_provider_rollup WHERE $__timeFilter(bucket) AND provider IN (${provider:singlequote}) GROUP BY provider ORDER BY total_tips_sol DESC"
+          "rawSql": "SELECT provider, round(sumMerge(tips_lamports_state) / 1e9, 4) AS total_tips_sol FROM default.sender_provider_rollup WHERE $__timeFilter(bucket) AND provider IN (${provider:singlequote}) GROUP BY provider ORDER BY total_tips_sol DESC"
         }
       ]
     },
@@ -118,7 +118,7 @@
           "editorType": "sql",
           "format": 1,
           "queryType": "table",
-          "rawSql": "SELECT provider, round(sumMerge(total_fees_sol), 4) AS total_fees_sol FROM default.sender_provider_rollup WHERE $__timeFilter(bucket) AND provider IN (${provider:singlequote}) GROUP BY provider ORDER BY total_fees_sol DESC"
+          "rawSql": "SELECT provider, round(sumMerge(fees_sol_state), 4) AS total_fees_sol FROM default.sender_provider_rollup WHERE $__timeFilter(bucket) AND provider IN (${provider:singlequote}) GROUP BY provider ORDER BY total_fees_sol DESC"
         }
       ]
     }
