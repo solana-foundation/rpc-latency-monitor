@@ -26,14 +26,14 @@ reference_slot:
 # RPC providers to benchmark. `url` may contain a ${ENV_VAR} placeholder; the
 # whole api-key/url secret is supplied via the environment.
 providers:
-  - name: helius
-    url: "https://mainnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}"
-  - name: triton
-    url: "https://${TRITON_HOST}/${TRITON_TOKEN}"
-  - name: quicknode
-    url: "${QUICKNODE_URL}"
   - name: alchemy
     url: "${ALCHEMY_URL}"
+  - name: helius
+    url: "https://mainnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}"
+  - name: quicknode
+    url: "${QUICKNODE_URL}"
+  - name: triton
+    url: "https://${TRITON_HOST}/${TRITON_TOKEN}"
 
 # Read checks to run against every provider. Each runs on its own loop.
 # `interval` is the base period; `jitter` randomizes it to avoid thundering herd.
