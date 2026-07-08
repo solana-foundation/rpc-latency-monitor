@@ -164,6 +164,52 @@ across vantage points. A typical fleet spans North America, Europe, and Asia. Ad
 vantage point is purely a matter of running another instance with a different `region` value — no
 code changes required.
 
+## Adding your RPC (for providers)
+
+We welcome RPC providers adding themselves. Inclusion is neutral and additive — no code changes, just
+configuration — and everyone is measured on identical terms (same methods, regions, cadence, and code).
+
+**Eligibility**
+
+- A standard **Solana mainnet JSON-RPC** endpoint.
+- A **read-only** credential we can use to probe 24/7 from all regions.
+- You accept **equal treatment**: the same check suite, regions, and cadence as every other provider,
+  with no preferential routing or pay-to-play.
+
+**Steps**
+
+1. **Open a PR** adding your entry to the `providers:` list in
+   [`config.example.yaml`](./config.example.yaml). Keep it alphabetical, use a lowercase `name`
+   (your brand, must be unique), and put any secret in a `${ENV_VAR}` placeholder — **never inline a
+   real key or token in the PR**:
+
+   ```yaml
+   providers:
+     # ...existing providers...
+     - name: yourrpc
+       url: "https://your-endpoint.example.com/?api-key=${YOURRPC_API_KEY}"
+       # or, if the whole URL is the secret:
+       # url: "${YOURRPC_URL}"
+   ```
+
+2. **In the PR description**, include: your provider name, the endpoint's location/anycast coverage,
+   which `${ENV_VAR}` holds the secret, and a contact.
+
+3. **Send the actual credential out-of-band.** Because this is a public repo, the real key/URL must
+   **not** appear in the PR. Share it with the Solana Foundation through your VIP Trading Program
+   contact (or the channel noted in the PR); we store it in our secret manager, never in git.
+
+4. **We review and deploy.** Once merged, we add the credential to the deployment and roll your
+   endpoint out across all regions. Your series then appear on the dashboards.
+
+> **Before your numbers go public**, we share your current data with you and give a review window to
+> flag any misconfiguration (regional routing, key tier, rate limits). No provider is surprised by
+> their own numbers going live.
+
+**Correcting your data.** If a region looks mis-routed, a key is on the wrong tier, or rate limits are
+skewing results, open an issue or PR — the methodology and config are open source and fully auditable,
+so we fix the setup, not the numbers.
+
 ## Deployment
 
 The Solana Foundation runs the monitor on Google Cloud — one lightweight container per region — so
@@ -233,7 +279,8 @@ cargo test --all-features
 
 Please keep changes focused, prefer self-documenting code over comments, and follow the existing
 metric and configuration conventions. New providers and regions should be additive and require no
-code changes — they are configuration.
+code changes — they are configuration. If you are an RPC provider adding yourself, see
+[Adding your RPC (for providers)](#adding-your-rpc-for-providers).
 
 Publishing the dashboard publicly (read-only share or snapshot, fronted by Cloudflare, with `/metrics`
 kept localhost-only): see [`docs/public-hardening.md`](./docs/public-hardening.md) and the committable
