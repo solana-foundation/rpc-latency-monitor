@@ -179,9 +179,9 @@ configuration — and everyone is measured on identical terms (same methods, reg
 **Steps**
 
 1. **Open a PR** adding your entry to the `providers:` list in
-   [`config.example.yaml`](./config.example.yaml). Keep it alphabetical, use a lowercase `name`
-   (your brand, must be unique), and put any secret in a `${ENV_VAR}` placeholder — **never inline a
-   real key or token in the PR**:
+   [`config.example.yaml`](./config.example.yaml). Add your entry in alphabetical order by `name`
+   (lowercase, your brand, must be unique), and put any secret in a `${ENV_VAR}` placeholder — **never
+   inline a real key or token in the PR**:
 
    ```yaml
    providers:
@@ -197,7 +197,9 @@ configuration — and everyone is measured on identical terms (same methods, reg
 
 3. **Send the actual credential out-of-band.** Because this is a public repo, the real key/URL must
    **not** appear in the PR. Share it with the Solana Foundation through your VIP Trading Program
-   contact (or the channel noted in the PR); we store it in our secret manager, never in git.
+   contact. If you don't have one, open a [GitHub issue](https://github.com/solana-foundation/rpc-latency-monitor/issues)
+   asking us to set up a secure channel — do **not** put the secret in the issue. We store credentials
+   in our secret manager, never in git.
 
 4. **We review and deploy.** Once merged, we add the credential to the deployment and roll your
    endpoint out across all regions. Your series then appear on the dashboards.
