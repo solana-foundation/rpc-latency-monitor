@@ -243,6 +243,10 @@ Dashboards live in [`grafana/`](./grafana). The primary board, **RPC Latency Mon
 A second board, **Sender** ([`grafana/sender-dashboard.json`](./grafana/sender-dashboard.json)),
 tracks provider economics for the trading program.
 
+The **public, filterable data view** is built natively on **solana.com/data** — it queries these same
+metrics server-side (read-only) and provides an on-brand UI with provider / region / method / time-range
+filters. The Grafana boards stay as the internal / full dashboards.
+
 Scrape and `remote_write` are configured in [`grafana/alloy-config.alloy`](./grafana/alloy-config.alloy)
 (15s scrape of `127.0.0.1:9464`, forwarding to Grafana Cloud via `GRAFANA_CLOUD_*` env vars).
 
@@ -284,10 +288,10 @@ metric and configuration conventions. New providers and regions should be additi
 code changes — they are configuration. If you are an RPC provider adding yourself, see
 [Adding your RPC (for providers)](#adding-your-rpc-for-providers).
 
-Publishing the dashboard publicly (read-only share or snapshot, fronted by Cloudflare, with `/metrics`
-kept localhost-only): see [`docs/public-hardening.md`](./docs/public-hardening.md) and the committable
-Cloudflare WAF / rate-limit / cache rules in [`deploy/cloudflare/waf-rules.json`](./deploy/cloudflare/waf-rules.json).
-None of this flips anything public on its own.
+The public-facing data view is built natively on **solana.com/data**, which queries these metrics
+server-side (read-only) and owns the on-brand UI and filters; the Grafana boards stay internal. An
+earlier option to public-share Grafana directly, fronted by Cloudflare, is documented in
+[`docs/public-hardening.md`](./docs/public-hardening.md) but is not the path taken.
 
 ## License
 
