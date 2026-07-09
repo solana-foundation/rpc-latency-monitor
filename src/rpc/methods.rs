@@ -31,7 +31,8 @@ const BLOCK_CONFIRMATION_DEPTH: u64 = 32;
 const ARCHIVAL_SLOT_DEPTH: u64 = 40_000_000;
 
 const SIGNATURES_LIMIT: u64 = 1000;
-const MULTI_ACCOUNT_BATCH: usize = 5;
+// Kept in lockstep with the fallback set so batch size doesn't step-change at warm-up.
+const MULTI_ACCOUNT_BATCH: usize = MULTI_ACCOUNTS.len();
 // Cap on how many account keys to retain from a fetched block.
 pub const MAX_RECENT_ACCOUNTS: usize = 32;
 
@@ -127,9 +128,11 @@ impl RpcMethod {
                 { "encoding": "base64", "commitment": "processed" },
             ]),
             Self::GetSignaturesForAddress => {
-                let address =
-                    rotate(&ctx.recent_accounts, ctx.tip_slot).unwrap_or(FALLBACK_ADDRESS);
-                json!([address, { "limit": SIGNATURES_LIMIT }])
+                // A permanently busy address queried at `confirmed` (matching the
+                // block-fetch commitment). Its first page churns every slot, so it stays
+                // fresh/uncacheable, while avoiding the empty-finalized-window an unseen
+                // or just-closed live account would hit.
+                json!([FALLBACK_ADDRESS, { "limit": SIGNATURES_LIMIT, "commitment": "confirmed" }])
             }
             Self::GetBlockRecent => {
                 let slot = ctx.tip_slot?.saturating_sub(BLOCK_CONFIRMATION_DEPTH);
@@ -159,7 +162,10 @@ impl RpcMethod {
             Self::GetHealth => result.as_str() == Some("ok"),
             Self::GetSlot => result.as_u64().is_some_and(|slot| slot > 0),
             Self::GetLatestBlockhash => non_empty_str(value_of(result).get("blockhash")),
-            Self::GetAccountInfo => result.get("value").is_some_and(|v| !v.is_null()),
+            // A live target may have been closed since we saw it in a block, so a null
+            // value is legitimate; require a well-formed envelope, not presence.
+            // (get_multiple_accounts still asserts real, non-null content.)
+            Self::GetAccountInfo => result.get("value").is_some(),
             Self::GetMultipleAccounts => value_of(result)
                 .as_array()
                 .is_some_and(|a| a.iter().any(|entry| !entry.is_null())),
@@ -374,10 +380,12 @@ mod tests {
 
     #[test]
     fn empty_or_truncated_responses_are_invalid() {
-        // Null account = failure.
-        assert!(!RpcMethod::GetAccountInfo.is_valid_result(&json!({ "value": null })));
+        // Account read tolerates a null value (target may have been closed) but needs
+        // a well-formed envelope; a response missing the value key is invalid.
+        assert!(RpcMethod::GetAccountInfo.is_valid_result(&json!({ "value": null })));
         assert!(RpcMethod::GetAccountInfo
             .is_valid_result(&json!({ "value": { "data": ["", "base64"] } })));
+        assert!(!RpcMethod::GetAccountInfo.is_valid_result(&json!({ "context": { "slot": 1 } })));
         // Block with no transactions = truncated.
         assert!(!RpcMethod::GetBlockRecent
             .is_valid_result(&json!({ "blockhash": "abc", "transactions": [] })));

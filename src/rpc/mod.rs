@@ -233,11 +233,11 @@ mod tests {
 
     #[test]
     fn empty_result_on_200_is_an_empty_error_not_success() {
-        // 200 + a result key, but a null account value: not a success.
+        // 200 + a result key, but an empty gPA value (owner has thousands): not success.
         let parsed = classify(
             StatusCode::OK,
-            &body(r#"{"jsonrpc":"2.0","result":{"context":{"slot":1},"value":null},"id":1}"#),
-            RpcMethod::GetAccountInfo,
+            &body(r#"{"jsonrpc":"2.0","result":{"context":{"slot":1},"value":[]},"id":1}"#),
+            RpcMethod::GetProgramAccounts,
         );
         assert_eq!(parsed.status, CallStatus::Error(ErrorKind::Empty));
         assert_eq!(parsed.observed_slot, None);
