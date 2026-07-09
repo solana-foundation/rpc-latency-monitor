@@ -34,7 +34,7 @@
           "type": "prometheus",
           "uid": "grafanacloud-prom"
         },
-        "query": "label_values(rpc_up, region)",
+        "query": "label_values(rpc_up{cloud=~\"$infra\"}, region)",
         "refresh": 2,
         "includeAll": true,
         "multi": false,
@@ -51,7 +51,7 @@
           "type": "prometheus",
           "uid": "grafanacloud-prom"
         },
-        "query": "label_values(rpc_up{region=~\"$region\", provider!=\"public-mainnet\"}, provider)",
+        "query": "label_values(rpc_up{cloud=~\"$infra\", region=~\"$region\", provider!=\"public-mainnet\"}, provider)",
         "refresh": 2,
         "includeAll": true,
         "multi": true,
