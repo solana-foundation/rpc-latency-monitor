@@ -34,7 +34,7 @@
           "type": "prometheus",
           "uid": "grafanacloud-prom"
         },
-        "query": "label_values(rpc_up{infra_provider=~\"$infra\"}, region)",
+        "query": "label_values(rpc_up{infra=~\"$infra\"}, region)",
         "refresh": 2,
         "includeAll": true,
         "multi": false,
@@ -51,7 +51,7 @@
           "type": "prometheus",
           "uid": "grafanacloud-prom"
         },
-        "query": "label_values(rpc_up{infra_provider=~\"$infra\", region=~\"$region\", provider!=\"public-mainnet\"}, provider)",
+        "query": "label_values(rpc_up{infra=~\"$infra\", region=~\"$region\", provider!=\"public-mainnet\"}, provider)",
         "refresh": 2,
         "includeAll": true,
         "multi": true,
@@ -106,7 +106,7 @@
             "type": "prometheus",
             "uid": "grafanacloud-prom"
           },
-          "expr": "histogram_quantile(0.99, sum by (le, provider) (rate(rpc_latency_seconds_bucket{infra_provider=~\"$infra\", method=\"$method\", region=~\"$region\", provider=~\"$provider\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.99, sum by (le, provider) (rate(rpc_latency_seconds_bucket{infra=~\"$infra\", method=\"$method\", region=~\"$region\", provider=~\"$provider\"}[$__rate_interval])))",
           "legendFormat": "{{provider}}"
         }
       ]
@@ -138,7 +138,7 @@
             "type": "prometheus",
             "uid": "grafanacloud-prom"
           },
-          "expr": "histogram_quantile(0.50, sum by (le, provider) (rate(rpc_latency_seconds_bucket{infra_provider=~\"$infra\", method=\"$method\", region=~\"$region\", provider=~\"$provider\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.50, sum by (le, provider) (rate(rpc_latency_seconds_bucket{infra=~\"$infra\", method=\"$method\", region=~\"$region\", provider=~\"$provider\"}[$__rate_interval])))",
           "legendFormat": "{{provider}}"
         }
       ]
@@ -170,7 +170,7 @@
             "type": "prometheus",
             "uid": "grafanacloud-prom"
           },
-          "expr": "histogram_quantile(0.95, sum by (le, provider) (rate(rpc_latency_seconds_bucket{infra_provider=~\"$infra\", method=\"$method\", region=~\"$region\", provider=~\"$provider\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.95, sum by (le, provider) (rate(rpc_latency_seconds_bucket{infra=~\"$infra\", method=\"$method\", region=~\"$region\", provider=~\"$provider\"}[$__rate_interval])))",
           "legendFormat": "{{provider}}"
         }
       ]
@@ -202,7 +202,7 @@
             "type": "prometheus",
             "uid": "grafanacloud-prom"
           },
-          "expr": "max by (provider) (rpc_slot_lag{infra_provider=~\"$infra\", region=~\"$region\", provider=~\"$provider\"})",
+          "expr": "max by (provider) (rpc_slot_lag{infra=~\"$infra\", region=~\"$region\", provider=~\"$provider\"})",
           "legendFormat": "{{provider}}"
         }
       ]
@@ -240,7 +240,7 @@
             "type": "prometheus",
             "uid": "grafanacloud-prom"
           },
-          "expr": "100 * avg by (provider) ( avg_over_time( ( (sum by (provider, region) (rate(rpc_latency_seconds_sum{infra_provider=~\"$infra\", method=\"$method\", region=~\"$region\", provider=~\"$provider\"}[$__rate_interval])) / sum by (provider, region) (rate(rpc_latency_seconds_count{infra_provider=~\"$infra\", method=\"$method\", region=~\"$region\", provider=~\"$provider\"}[$__rate_interval]))) == bool on (region) group_left() (min by (region) (sum by (provider, region) (rate(rpc_latency_seconds_sum{infra_provider=~\"$infra\", method=\"$method\", region=~\"$region\", provider=~\"$provider\"}[$__rate_interval])) / sum by (provider, region) (rate(rpc_latency_seconds_count{infra_provider=~\"$infra\", method=\"$method\", region=~\"$region\", provider=~\"$provider\"}[$__rate_interval])))) )[1h:1m] ) )",
+          "expr": "100 * avg by (provider) ( avg_over_time( ( (sum by (provider, region) (rate(rpc_latency_seconds_sum{infra=~\"$infra\", method=\"$method\", region=~\"$region\", provider=~\"$provider\"}[$__rate_interval])) / sum by (provider, region) (rate(rpc_latency_seconds_count{infra=~\"$infra\", method=\"$method\", region=~\"$region\", provider=~\"$provider\"}[$__rate_interval]))) == bool on (region) group_left() (min by (region) (sum by (provider, region) (rate(rpc_latency_seconds_sum{infra=~\"$infra\", method=\"$method\", region=~\"$region\", provider=~\"$provider\"}[$__rate_interval])) / sum by (provider, region) (rate(rpc_latency_seconds_count{infra=~\"$infra\", method=\"$method\", region=~\"$region\", provider=~\"$provider\"}[$__rate_interval])))) )[1h:1m] ) )",
           "legendFormat": "{{provider}}",
           "instant": true
         }
@@ -281,7 +281,7 @@
             "type": "prometheus",
             "uid": "grafanacloud-prom"
           },
-          "expr": "100 * avg by (provider, region) ( avg_over_time( ( (sum by (provider, region) (rate(rpc_latency_seconds_sum{infra_provider=~\"$infra\", method=\"$method\", region=~\"$region\", provider=~\"$provider\"}[$__rate_interval])) / sum by (provider, region) (rate(rpc_latency_seconds_count{infra_provider=~\"$infra\", method=\"$method\", region=~\"$region\", provider=~\"$provider\"}[$__rate_interval]))) == bool on (region) group_left() (min by (region) (sum by (provider, region) (rate(rpc_latency_seconds_sum{infra_provider=~\"$infra\", method=\"$method\", region=~\"$region\", provider=~\"$provider\"}[$__rate_interval])) / sum by (provider, region) (rate(rpc_latency_seconds_count{infra_provider=~\"$infra\", method=\"$method\", region=~\"$region\", provider=~\"$provider\"}[$__rate_interval])))) )[1h:1m] ) )",
+          "expr": "100 * avg by (provider, region) ( avg_over_time( ( (sum by (provider, region) (rate(rpc_latency_seconds_sum{infra=~\"$infra\", method=\"$method\", region=~\"$region\", provider=~\"$provider\"}[$__rate_interval])) / sum by (provider, region) (rate(rpc_latency_seconds_count{infra=~\"$infra\", method=\"$method\", region=~\"$region\", provider=~\"$provider\"}[$__rate_interval]))) == bool on (region) group_left() (min by (region) (sum by (provider, region) (rate(rpc_latency_seconds_sum{infra=~\"$infra\", method=\"$method\", region=~\"$region\", provider=~\"$provider\"}[$__rate_interval])) / sum by (provider, region) (rate(rpc_latency_seconds_count{infra=~\"$infra\", method=\"$method\", region=~\"$region\", provider=~\"$provider\"}[$__rate_interval])))) )[1h:1m] ) )",
           "legendFormat": "{{region}} / {{provider}}",
           "instant": true
         }
