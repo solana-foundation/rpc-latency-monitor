@@ -58,8 +58,6 @@ pub struct CheckConfig {
     pub interval: Duration,
     #[serde(with = "humantime_serde", default)]
     pub jitter: Duration,
-    /// Optional per-check request timeout, overriding the global `request_timeout`
-    /// (e.g. a heavier archival fetch needs longer).
     #[serde(with = "humantime_serde", default)]
     pub timeout: Option<Duration>,
 }

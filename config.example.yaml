@@ -68,7 +68,6 @@ checks:
   - method: get_signatures_for_address
     interval: "10s"
     jitter: "2s"
-  # Archival read (archival-only; non-archival tiers error). Longer timeout for cold storage.
   - method: get_block_archival
     interval: "30s"
     jitter: "5s"

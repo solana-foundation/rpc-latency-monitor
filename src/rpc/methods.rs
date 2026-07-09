@@ -3,37 +3,24 @@ use serde_json::{json, Value};
 
 use crate::rpc::RequestContext;
 
-// Real, permanent mainnet accounts used as fallbacks and for multi-account reads.
-// These exist indefinitely, so a `null`/empty response for them is a real failure
-// (not a legitimately-absent account) and is scored as such.
 const USDC_MINT: &str = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const USDT_MINT: &str = "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB";
 const WSOL_MINT: &str = "So11111111111111111111111111111111111111112";
 const TOKEN_PROGRAM: &str = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
 
-// Fallback single-account target when no live account has been observed yet.
 const FALLBACK_ACCOUNT: &str = USDC_MINT;
-// Fallback multi-account batch (real accounts, all present).
 const MULTI_ACCOUNTS: [&str; 4] = [USDC_MINT, USDT_MINT, WSOL_MINT, TOKEN_PROGRAM];
-// Fallback busy address for signature listing.
 const FALLBACK_ADDRESS: &str = USDC_MINT;
 
-// A token owner with a large, stable set of token accounts (~thousands), so
-// getProgramAccounts and getTokenAccountsByOwner do real, non-trivial work.
 const GPA_TOKEN_OWNER: &str = "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM";
 const TOKEN_ACCOUNT_LEN: u64 = 165;
 const TOKEN_ACCOUNT_OWNER_OFFSET: u64 = 32;
 
 const BLOCK_CONFIRMATION_DEPTH: u64 = 32;
-// Slots behind the tip for the archival probe (~months of history at ~2.5 slots/s),
-// far past what a non-archival node retains — so this measures archival/cold-storage
-// retrieval. Non-archival providers will (correctly) error here.
 const ARCHIVAL_SLOT_DEPTH: u64 = 40_000_000;
 
 const SIGNATURES_LIMIT: u64 = 1000;
-// Kept in lockstep with the fallback set so batch size doesn't step-change at warm-up.
 const MULTI_ACCOUNT_BATCH: usize = MULTI_ACCOUNTS.len();
-// Cap on how many account keys to retain from a fetched block.
 pub const MAX_RECENT_ACCOUNTS: usize = 32;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -52,9 +39,6 @@ pub enum RpcMethod {
     GetSignaturesForAddress,
 }
 
-/// Rotate a target out of a live pool using the tip slot as the seed, so the
-/// target changes every cycle (defeats caching / hard-coded-target gaming) while
-/// staying identical across providers probed at the same tip.
 fn rotate(pool: &[String], seed: Option<u64>) -> Option<&str> {
     if pool.is_empty() {
         return None;
@@ -103,8 +87,6 @@ impl RpcMethod {
             Self::GetSlot => json!([{ "commitment": "processed" }]),
             Self::GetLatestBlockhash => json!([{ "commitment": "processed" }]),
             Self::GetAccountInfo => {
-                // Rotate over accounts seen in recent blocks (real, varying, hard to
-                // pre-cache); fall back to a known-present account before any block lands.
                 let account =
                     rotate(&ctx.recent_accounts, ctx.tip_slot).unwrap_or(FALLBACK_ACCOUNT);
                 json!([account, { "encoding": "base64", "commitment": "processed" }])
@@ -128,10 +110,6 @@ impl RpcMethod {
                 { "encoding": "base64", "commitment": "processed" },
             ]),
             Self::GetSignaturesForAddress => {
-                // A permanently busy address queried at `confirmed` (matching the
-                // block-fetch commitment). Its first page churns every slot, so it stays
-                // fresh/uncacheable, while avoiding the empty-finalized-window an unseen
-                // or just-closed live account would hit.
                 json!([FALLBACK_ADDRESS, { "limit": SIGNATURES_LIMIT, "commitment": "confirmed" }])
             }
             Self::GetBlockRecent => {
@@ -154,17 +132,11 @@ impl RpcMethod {
         Some(params)
     }
 
-    /// Whether a 200/`result` response is actually complete, not empty or truncated.
-    /// A fast-but-empty answer (null account, zero transactions, empty page) must not
-    /// score as a success.
     pub fn is_valid_result(self, result: &Value) -> bool {
         match self {
             Self::GetHealth => result.as_str() == Some("ok"),
             Self::GetSlot => result.as_u64().is_some_and(|slot| slot > 0),
             Self::GetLatestBlockhash => non_empty_str(value_of(result).get("blockhash")),
-            // A live target may have been closed since we saw it in a block, so a null
-            // value is legitimate; require a well-formed envelope, not presence.
-            // (get_multiple_accounts still asserts real, non-null content.)
             Self::GetAccountInfo => result.get("value").is_some(),
             Self::GetMultipleAccounts => value_of(result)
                 .as_array()
@@ -212,8 +184,6 @@ impl RpcMethod {
             .map(str::to_owned)
     }
 
-    /// Account keys observed in a freshly fetched block, used as live probe targets
-    /// for account reads. Only the recent-block fetch yields these.
     pub fn recent_accounts(self, result: &Value) -> Vec<String> {
         if !matches!(self, Self::GetBlockRecent) {
             return Vec::new();
@@ -254,8 +224,6 @@ fn block_params(slot: u64) -> Value {
     }])
 }
 
-/// A rotating window of `MULTI_ACCOUNT_BATCH` accounts from the live pool, or the
-/// static fallback set before any block has been observed.
 fn pick_batch(pool: &[String], seed: Option<u64>) -> Vec<String> {
     if pool.len() >= MULTI_ACCOUNT_BATCH {
         let start = (seed.unwrap_or(0) as usize) % pool.len();
@@ -267,8 +235,6 @@ fn pick_batch(pool: &[String], seed: Option<u64>) -> Vec<String> {
     }
 }
 
-/// `result.value` for methods that wrap their payload in a context envelope,
-/// falling back to the result itself.
 fn value_of(result: &Value) -> &Value {
     result.get("value").unwrap_or(result)
 }
@@ -298,20 +264,18 @@ mod tests {
 
     #[test]
     fn account_read_falls_back_then_rotates_over_live_accounts() {
-        // No observed accounts yet -> fallback account, still runs.
         let params = RpcMethod::GetAccountInfo
             .build_params(&RequestContext::default())
             .expect("account read always builds");
         assert_eq!(params[0], json!(FALLBACK_ACCOUNT));
 
-        // With a live pool, the tip slot selects (and rotates) the target.
         let ctx = RequestContext {
             tip_slot: Some(3),
             recent_accounts: vec!["A".into(), "B".into(), "C".into()],
             ..RequestContext::default()
         };
         let params = RpcMethod::GetAccountInfo.build_params(&ctx).unwrap();
-        assert_eq!(params[0], json!("A")); // 3 % 3 == 0
+        assert_eq!(params[0], json!("A"));
     }
 
     #[test]
@@ -328,7 +292,6 @@ mod tests {
 
     #[test]
     fn archival_block_reaches_deep_into_history() {
-        // Not enough history yet -> skipped.
         assert!(RpcMethod::GetBlockArchival
             .build_params(&ctx_with_tip(10))
             .is_none());
@@ -345,7 +308,6 @@ mod tests {
             .build_params(&RequestContext::default())
             .unwrap();
         assert_eq!(params[0], json!(TOKEN_PROGRAM));
-        // No dataSlice: the scan returns real account data, not zero bytes.
         assert!(params[1].get("dataSlice").is_none());
         assert_eq!(
             params[1]["filters"][0],
@@ -380,20 +342,15 @@ mod tests {
 
     #[test]
     fn empty_or_truncated_responses_are_invalid() {
-        // Account read tolerates a null value (target may have been closed) but needs
-        // a well-formed envelope; a response missing the value key is invalid.
         assert!(RpcMethod::GetAccountInfo.is_valid_result(&json!({ "value": null })));
         assert!(RpcMethod::GetAccountInfo
             .is_valid_result(&json!({ "value": { "data": ["", "base64"] } })));
         assert!(!RpcMethod::GetAccountInfo.is_valid_result(&json!({ "context": { "slot": 1 } })));
-        // Block with no transactions = truncated.
         assert!(!RpcMethod::GetBlockRecent
             .is_valid_result(&json!({ "blockhash": "abc", "transactions": [] })));
         assert!(RpcMethod::GetBlockRecent
             .is_valid_result(&json!({ "blockhash": "abc", "transactions": [{}] })));
-        // Empty signature page = failure for a busy address.
         assert!(!RpcMethod::GetSignaturesForAddress.is_valid_result(&json!([])));
-        // Empty gPA result = failure (owner has many accounts).
         assert!(!RpcMethod::GetProgramAccounts.is_valid_result(&json!({ "value": [] })));
         assert!(RpcMethod::GetHealth.is_valid_result(&json!("ok")));
         assert!(!RpcMethod::GetHealth.is_valid_result(&json!("behind")));
@@ -410,7 +367,6 @@ mod tests {
         });
         let accounts = RpcMethod::GetBlockRecent.recent_accounts(&block);
         assert_eq!(accounts, vec!["k1", "k2", "k3"]);
-        // Only the recent-block fetch yields targets.
         assert!(RpcMethod::GetSlot.recent_accounts(&block).is_empty());
     }
 

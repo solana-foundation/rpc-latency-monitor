@@ -13,7 +13,6 @@ use crate::rpc::methods::RpcMethod;
 pub struct RequestContext {
     pub tip_slot: Option<u64>,
     pub recent_signature: Option<String>,
-    /// Account keys observed in a recently fetched block, used as live probe targets.
     pub recent_accounts: Vec<String>,
 }
 
@@ -39,7 +38,6 @@ pub enum ErrorKind {
     HttpStatus(u16),
     RpcError(i64),
     Decode,
-    /// A 200 response whose result was empty, null, or truncated.
     Empty,
 }
 
@@ -115,7 +113,6 @@ impl RpcClient {
             "params": params,
         });
 
-        // Per-check timeout overrides the client default when set.
         let mut request = self.http.post(url).json(&body);
         if let Some(timeout) = timeout {
             request = request.timeout(timeout);
@@ -192,8 +189,6 @@ fn classify(status: StatusCode, body: &[u8], method: RpcMethod) -> Parsed {
     let Some(result) = json.get("result") else {
         return Parsed::error(ErrorKind::Decode);
     };
-    // A 200 with a result key still counts as failure if the payload is empty or
-    // truncated — a fast empty response must not beat a correct, slower one.
     if !method.is_valid_result(result) {
         return Parsed::error(ErrorKind::Empty);
     }
@@ -239,7 +234,6 @@ mod tests {
 
     #[test]
     fn empty_result_on_200_is_an_empty_error_not_success() {
-        // 200 + a result key, but an empty gPA value (owner has thousands): not success.
         let parsed = classify(
             StatusCode::OK,
             &body(r#"{"jsonrpc":"2.0","result":{"context":{"slot":1},"value":[]},"id":1}"#),
