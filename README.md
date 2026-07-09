@@ -156,7 +156,7 @@ to either the config value or the raw JSON-RPC name:
 | `get_program_accounts` | `getProgramAccounts` | `getProgramAccounts` | Token GPA filtered to one owner, **returning real account data** (no zero-length `dataSlice`). |
 | `get_token_accounts_by_owner` | `getTokenAccountsByOwner` | `getTokenAccountsByOwner` | All token accounts for an owner with a large, stable set. |
 | `get_block_recent` | `getBlock` | `getBlock_recent` | A recent block a fixed depth behind the tip, **`transactionDetails: full`** (a real block fetch); also seeds the live account pool. |
-| `get_block_archival` | `getBlock` | `getBlock_archival` | Optional: a full block ~40M slots back, retained only by archival nodes. Off by default. |
+| `get_block_archival` | `getBlock` | `getBlock_archival` | A full block ~40M slots back, retained only by archival nodes (non-archival tiers correctly error). Longer per-check `timeout` (30s) for cold-storage retrieval. |
 | `get_transaction_recent` | `getTransaction` | `getTransaction_recent` | A signature freshly discovered by `get_signatures_for_address`. |
 | `get_signatures_for_address` | `getSignaturesForAddress` | `getSignaturesForAddress` | A permanently busy address at `confirmed`, `limit` 1000 (a full page, not just the head). |
 

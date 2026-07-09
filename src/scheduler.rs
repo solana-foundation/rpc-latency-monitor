@@ -52,7 +52,11 @@ impl CheckTask {
                 recent_signature: self.shared.recent_signature(),
                 recent_accounts: self.shared.recent_accounts(),
             };
-            if let Some(result) = self.client.call(&self.url, self.check.method, &ctx).await {
+            if let Some(result) = self
+                .client
+                .call(&self.url, self.check.method, &ctx, self.check.timeout)
+                .await
+            {
                 self.record(&result);
             }
             sleep(self.next_delay()).await;

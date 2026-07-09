@@ -68,12 +68,11 @@ checks:
   - method: get_signatures_for_address
     interval: "10s"
     jitter: "2s"
-  # Optional archival probe: fetches a full block ~40M slots behind the tip, which
-  # only archival nodes retain. Non-archival tiers will (correctly) error. Enable
-  # deliberately if you want to measure cold-storage retrieval.
-  # - method: get_block_archival
-  #   interval: "30s"
-  #   jitter: "5s"
+  # Archival read (archival-only; non-archival tiers error). Longer timeout for cold storage.
+  - method: get_block_archival
+    interval: "30s"
+    jitter: "5s"
+    timeout: "30s"
 
 # Per-request timeout for outbound RPC calls.
 request_timeout: "10s"

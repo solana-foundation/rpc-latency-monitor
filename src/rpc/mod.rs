@@ -105,6 +105,7 @@ impl RpcClient {
         url: &str,
         method: RpcMethod,
         ctx: &RequestContext,
+        timeout: Option<Duration>,
     ) -> Option<CallResult> {
         let params = method.build_params(ctx)?;
         let body = serde_json::json!({
@@ -114,8 +115,13 @@ impl RpcClient {
             "params": params,
         });
 
+        // Per-check timeout overrides the client default when set.
+        let mut request = self.http.post(url).json(&body);
+        if let Some(timeout) = timeout {
+            request = request.timeout(timeout);
+        }
         let start = Instant::now();
-        let response = match self.http.post(url).json(&body).send().await {
+        let response = match request.send().await {
             Ok(response) => response,
             Err(error) => {
                 return Some(CallResult {

@@ -41,7 +41,7 @@ pub async fn poll_reference_endpoint(
     loop {
         ticker.tick().await;
         let Some(result) = client
-            .call(&url, RpcMethod::GetSlot, &RequestContext::default())
+            .call(&url, RpcMethod::GetSlot, &RequestContext::default(), None)
             .await
         else {
             continue;
