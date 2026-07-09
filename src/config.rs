@@ -58,6 +58,8 @@ pub struct CheckConfig {
     pub interval: Duration,
     #[serde(with = "humantime_serde", default)]
     pub jitter: Duration,
+    #[serde(with = "humantime_serde", default)]
+    pub timeout: Option<Duration>,
 }
 
 impl Config {

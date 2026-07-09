@@ -13,6 +13,7 @@ use crate::rpc::methods::RpcMethod;
 pub struct RequestContext {
     pub tip_slot: Option<u64>,
     pub recent_signature: Option<String>,
+    pub recent_accounts: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -21,6 +22,7 @@ pub struct CallResult {
     pub status: CallStatus,
     pub observed_slot: Option<u64>,
     pub signature: Option<String>,
+    pub accounts: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -36,6 +38,7 @@ pub enum ErrorKind {
     HttpStatus(u16),
     RpcError(i64),
     Decode,
+    Empty,
 }
 
 impl CallStatus {
@@ -70,6 +73,7 @@ impl ErrorKind {
             Self::HttpStatus(_) => "http_status",
             Self::RpcError(_) => "rpc_error",
             Self::Decode => "decode",
+            Self::Empty => "empty",
         }
     }
 }
@@ -99,6 +103,7 @@ impl RpcClient {
         url: &str,
         method: RpcMethod,
         ctx: &RequestContext,
+        timeout: Option<Duration>,
     ) -> Option<CallResult> {
         let params = method.build_params(ctx)?;
         let body = serde_json::json!({
@@ -108,8 +113,12 @@ impl RpcClient {
             "params": params,
         });
 
+        let mut request = self.http.post(url).json(&body);
+        if let Some(timeout) = timeout {
+            request = request.timeout(timeout);
+        }
         let start = Instant::now();
-        let response = match self.http.post(url).json(&body).send().await {
+        let response = match request.send().await {
             Ok(response) => response,
             Err(error) => {
                 return Some(CallResult {
@@ -117,6 +126,7 @@ impl RpcClient {
                     status: CallStatus::Error(send_error_kind(&error)),
                     observed_slot: None,
                     signature: None,
+                    accounts: Vec::new(),
                 });
             }
         };
@@ -134,6 +144,7 @@ impl RpcClient {
             status: parsed.status,
             observed_slot: parsed.observed_slot,
             signature: parsed.signature,
+            accounts: parsed.accounts,
         })
     }
 }
@@ -142,6 +153,7 @@ struct Parsed {
     status: CallStatus,
     observed_slot: Option<u64>,
     signature: Option<String>,
+    accounts: Vec<String>,
 }
 
 impl Parsed {
@@ -150,6 +162,7 @@ impl Parsed {
             status: CallStatus::Error(kind),
             observed_slot: None,
             signature: None,
+            accounts: Vec::new(),
         }
     }
 }
@@ -176,10 +189,14 @@ fn classify(status: StatusCode, body: &[u8], method: RpcMethod) -> Parsed {
     let Some(result) = json.get("result") else {
         return Parsed::error(ErrorKind::Decode);
     };
+    if !method.is_valid_result(result) {
+        return Parsed::error(ErrorKind::Empty);
+    }
     Parsed {
         status: CallStatus::Success,
         observed_slot: method.observed_slot(result),
         signature: method.recent_signature(result),
+        accounts: method.recent_accounts(result),
     }
 }
 
@@ -206,11 +223,24 @@ mod tests {
     fn success_extracts_context_slot_for_latest_blockhash() {
         let parsed = classify(
             StatusCode::OK,
-            &body(r#"{"jsonrpc":"2.0","result":{"context":{"slot":999},"value":{}},"id":1}"#),
+            &body(
+                r#"{"jsonrpc":"2.0","result":{"context":{"slot":999},"value":{"blockhash":"abc"}},"id":1}"#,
+            ),
             RpcMethod::GetLatestBlockhash,
         );
         assert!(parsed.status.is_success());
         assert_eq!(parsed.observed_slot, Some(999));
+    }
+
+    #[test]
+    fn empty_result_on_200_is_an_empty_error_not_success() {
+        let parsed = classify(
+            StatusCode::OK,
+            &body(r#"{"jsonrpc":"2.0","result":{"context":{"slot":1},"value":[]},"id":1}"#),
+            RpcMethod::GetProgramAccounts,
+        );
+        assert_eq!(parsed.status, CallStatus::Error(ErrorKind::Empty));
+        assert_eq!(parsed.observed_slot, None);
     }
 
     #[test]

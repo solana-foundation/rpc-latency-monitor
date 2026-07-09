@@ -50,7 +50,13 @@ checks:
   - method: get_account_info
     interval: "10s"
     jitter: "2s"
+  - method: get_multiple_accounts
+    interval: "10s"
+    jitter: "2s"
   - method: get_program_accounts
+    interval: "30s"
+    jitter: "5s"
+  - method: get_token_accounts_by_owner
     interval: "30s"
     jitter: "5s"
   - method: get_block_recent
@@ -62,6 +68,10 @@ checks:
   - method: get_signatures_for_address
     interval: "10s"
     jitter: "2s"
+  - method: get_block_archival
+    interval: "30s"
+    jitter: "5s"
+    timeout: "30s"
 
 # Per-request timeout for outbound RPC calls.
 request_timeout: "10s"
