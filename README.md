@@ -227,8 +227,8 @@ America, Europe, and Asia:
 | `us-west2` | Los Angeles, US |
 | `europe-west2` | London, UK |
 | `europe-west3` | Frankfurt, DE |
+| `europe-west4` | Amsterdam, NL |
 | `asia-northeast1` | Tokyo, JP |
-| `asia-northeast3` | Seoul, KR |
 | `asia-southeast1` | Singapore, SG |
 
 Each container exports Prometheus metrics that are scraped locally and forwarded to Grafana Cloud.
