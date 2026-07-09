@@ -289,9 +289,7 @@ code changes — they are configuration. If you are an RPC provider adding yours
 [Adding your RPC (for providers)](#adding-your-rpc-for-providers).
 
 The public-facing data view is built natively on **solana.com/data**, which queries these metrics
-server-side (read-only) and owns the on-brand UI and filters; the Grafana boards stay internal. An
-earlier option to public-share Grafana directly, fronted by Cloudflare, is documented in
-[`docs/public-hardening.md`](./docs/public-hardening.md) but is not the path taken.
+server-side (read-only) and owns the on-brand UI and filters; the Grafana boards stay internal.
 
 ## License
 
