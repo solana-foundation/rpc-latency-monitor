@@ -103,6 +103,7 @@ mod tests {
             status,
             observed_slot: Some(100),
             signature: None,
+            accounts: Vec::new(),
         }
     }
 

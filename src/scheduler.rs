@@ -50,6 +50,7 @@ impl CheckTask {
             let ctx = RequestContext {
                 tip_slot: self.reference.current(),
                 recent_signature: self.shared.recent_signature(),
+                recent_accounts: self.shared.recent_accounts(),
             };
             if let Some(result) = self.client.call(&self.url, self.check.method, &ctx).await {
                 self.record(&result);
@@ -70,6 +71,9 @@ impl CheckTask {
         if let Some(signature) = &result.signature {
             self.shared.set_recent_signature(signature.clone());
         }
+        if !result.accounts.is_empty() {
+            self.shared.set_recent_accounts(result.accounts.clone());
+        }
     }
 
     fn next_delay(&self) -> Duration {
@@ -85,6 +89,7 @@ impl CheckTask {
 #[derive(Clone, Default)]
 struct SharedState {
     recent_signature: Arc<Mutex<Option<String>>>,
+    recent_accounts: Arc<Mutex<Vec<String>>>,
 }
 
 impl SharedState {
@@ -95,6 +100,19 @@ impl SharedState {
     fn set_recent_signature(&self, signature: String) {
         if let Ok(mut guard) = self.recent_signature.lock() {
             *guard = Some(signature);
+        }
+    }
+
+    fn recent_accounts(&self) -> Vec<String> {
+        self.recent_accounts
+            .lock()
+            .map(|guard| guard.clone())
+            .unwrap_or_default()
+    }
+
+    fn set_recent_accounts(&self, accounts: Vec<String>) {
+        if let Ok(mut guard) = self.recent_accounts.lock() {
+            *guard = accounts;
         }
     }
 }

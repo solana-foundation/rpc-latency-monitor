@@ -148,14 +148,17 @@ to either the config value or the raw JSON-RPC name:
 
 | Check (`method:` value) | JSON-RPC call | Prometheus `method` label | Notes |
 | --- | --- | --- | --- |
-| `get_health` | `getHealth` | `getHealth` | Liveness only. |
+| `get_health` | `getHealth` | `getHealth` | Liveness; validated to be `"ok"`. |
 | `get_slot` | `getSlot` | `getSlot` | `processed` commitment; feeds the reference tip. |
-| `get_latest_blockhash` | `getLatestBlockhash` | `getLatestBlockhash` | `processed`; reports context slot. |
-| `get_account_info` | `getAccountInfo` | `getAccountInfo` | System program account, `processed`. |
-| `get_program_accounts` | `getProgramAccounts` | `getProgramAccounts` | Token-program GPA with `memcmp` + `dataSlice` filters. |
-| `get_block_recent` | `getBlock` | `getBlock_recent` | A recent block at a fixed confirmation depth behind the tip. |
+| `get_latest_blockhash` | `getLatestBlockhash` | `getLatestBlockhash` | `processed`; validated to return a blockhash. |
+| `get_account_info` | `getAccountInfo` | `getAccountInfo` | A real account rotated from recently observed blocks (falls back to a known account); validated non-null. |
+| `get_multiple_accounts` | `getMultipleAccounts` | `getMultipleAccounts` | A batch of accounts from recent blocks — a core trading fast-path read. |
+| `get_program_accounts` | `getProgramAccounts` | `getProgramAccounts` | Token GPA filtered to one owner, **returning real account data** (no zero-length `dataSlice`). |
+| `get_token_accounts_by_owner` | `getTokenAccountsByOwner` | `getTokenAccountsByOwner` | All token accounts for an owner with a large, stable set. |
+| `get_block_recent` | `getBlock` | `getBlock_recent` | A recent block a fixed depth behind the tip, **`transactionDetails: full`** (a real block fetch); also seeds the live account pool. |
+| `get_block_archival` | `getBlock` | `getBlock_archival` | Optional: a full block ~40M slots back, retained only by archival nodes. Off by default. |
 | `get_transaction_recent` | `getTransaction` | `getTransaction_recent` | A signature freshly discovered by `get_signatures_for_address`. |
-| `get_signatures_for_address` | `getSignaturesForAddress` | `getSignaturesForAddress` | High-traffic address; seeds `get_transaction_recent`. |
+| `get_signatures_for_address` | `getSignaturesForAddress` | `getSignaturesForAddress` | A rotating recent address, `limit` 1000 (a full page, not just the head). |
 
 ### Regions
 
@@ -203,9 +206,16 @@ Scrape and `remote_write` are configured in [`grafana/alloy-config.alloy`](./gra
 The measurements are designed to be neutral and reproducible:
 
 - **Fresh, no-cache probes.** Every request sets `Cache-Control: no-cache` and `Pragma: no-cache`,
-  and queries are constructed to defeat trivial caching — e.g. `get_transaction_recent` chases a
-  signature freshly surfaced by `get_signatures_for_address`, and `get_block_recent` targets a moving
-  slot a fixed depth behind the tip. We measure live read performance, not cache hits.
+  and targets move each cycle to defeat caching and hard-coded-target gaming: `get_block_recent`
+  fetches a moving slot behind the tip, `get_transaction_recent` chases a signature freshly surfaced
+  by `get_signatures_for_address`, and the account reads (`get_account_info`, `get_multiple_accounts`,
+  `get_signatures_for_address`) rotate over **real accounts observed in recent blocks** rather than a
+  fixed address. We measure live read performance, not cache hits.
+- **Response validation.** A `200` with an empty, null, or truncated payload is scored as a failure,
+  not a fast success — a null account, a zero-transaction block, or an empty signature page cannot
+  win on latency. Queries are also sized to do real work: `get_block_recent` uses
+  `transactionDetails: full`, and `get_program_accounts` returns real account data (no zero-length
+  `dataSlice`).
 - **Win %.** For a given method and region, the dashboards compute how often each provider was the
   fastest responder, complementing raw p50/p99 latency so a provider can't win on averages while
   losing on consistency.
@@ -218,8 +228,9 @@ The measurements are designed to be neutral and reproducible:
   how providers handle expensive index-style requests; it is weighted separately from the
   lightweight checks rather than averaged into them.
 
-Outcomes are classified precisely — `timeout`, `transport`, `http_status`, `rpc_error`, `decode` —
-so a slow-but-correct provider is never conflated with a fast-but-failing one.
+Outcomes are classified precisely — `timeout`, `transport`, `http_status`, `rpc_error`, `decode`,
+`empty` — so a slow-but-correct provider is never conflated with a fast-but-failing (or fast-but-empty)
+one.
 
 ## Contributing
 
