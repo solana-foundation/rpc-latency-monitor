@@ -46,6 +46,7 @@ async fn main() -> anyhow::Result<()> {
         client,
         metrics.clone(),
         reference,
+        config.max_slot_lag,
     );
 
     server::serve(config.server.bind, metrics).await

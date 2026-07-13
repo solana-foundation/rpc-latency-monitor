@@ -22,6 +22,8 @@ pub struct Config {
     pub checks: Vec<CheckConfig>,
     #[serde(with = "humantime_serde", default = "default_request_timeout")]
     pub request_timeout: Duration,
+    #[serde(default = "default_max_slot_lag")]
+    pub max_slot_lag: u64,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -107,6 +109,10 @@ impl Default for ReferenceSlotConfig {
 
 const fn default_request_timeout() -> Duration {
     Duration::from_secs(10)
+}
+
+const fn default_max_slot_lag() -> u64 {
+    150
 }
 
 const fn default_poll_interval() -> Duration {

@@ -1,3 +1,4 @@
+use base64::Engine;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
@@ -8,10 +9,10 @@ const USDT_MINT: &str = "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB";
 const WSOL_MINT: &str = "So11111111111111111111111111111111111111112";
 const TOKEN_PROGRAM: &str = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
 
-const FALLBACK_ACCOUNT: &str = USDC_MINT;
 const MULTI_ACCOUNTS: [&str; 4] = [USDC_MINT, USDT_MINT, WSOL_MINT, TOKEN_PROGRAM];
 const FALLBACK_ADDRESS: &str = USDC_MINT;
 
+const CLOCK_SYSVAR: &str = "SysvarC1ock11111111111111111111111111111111";
 const GPA_TOKEN_OWNER: &str = "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM";
 const TOKEN_ACCOUNT_LEN: u64 = 165;
 const TOKEN_ACCOUNT_OWNER_OFFSET: u64 = 32;
@@ -37,14 +38,6 @@ pub enum RpcMethod {
     GetBlockArchival,
     GetTransactionRecent,
     GetSignaturesForAddress,
-}
-
-fn rotate(pool: &[String], seed: Option<u64>) -> Option<&str> {
-    if pool.is_empty() {
-        return None;
-    }
-    let idx = (seed.unwrap_or(0) as usize) % pool.len();
-    Some(pool[idx].as_str())
 }
 
 impl RpcMethod {
@@ -87,9 +80,7 @@ impl RpcMethod {
             Self::GetSlot => json!([{ "commitment": "processed" }]),
             Self::GetLatestBlockhash => json!([{ "commitment": "processed" }]),
             Self::GetAccountInfo => {
-                let account =
-                    rotate(&ctx.recent_accounts, ctx.tip_slot).unwrap_or(FALLBACK_ACCOUNT);
-                json!([account, { "encoding": "base64", "commitment": "processed" }])
+                json!([CLOCK_SYSVAR, { "encoding": "base64", "commitment": "processed" }])
             }
             Self::GetMultipleAccounts => {
                 let accounts = pick_batch(&ctx.recent_accounts, ctx.tip_slot);
@@ -137,7 +128,7 @@ impl RpcMethod {
             Self::GetHealth => result.as_str() == Some("ok"),
             Self::GetSlot => result.as_u64().is_some_and(|slot| slot > 0),
             Self::GetLatestBlockhash => non_empty_str(value_of(result).get("blockhash")),
-            Self::GetAccountInfo => result.get("value").is_some(),
+            Self::GetAccountInfo => clock_slot_from_value(value_of(result)).is_some(),
             Self::GetMultipleAccounts => value_of(result)
                 .as_array()
                 .is_some_and(|a| a.iter().any(|entry| !entry.is_null())),
@@ -159,8 +150,8 @@ impl RpcMethod {
     pub fn observed_slot(self, result: &Value) -> Option<u64> {
         match self {
             Self::GetSlot => result.as_u64(),
+            Self::GetAccountInfo => clock_slot_from_value(value_of(result)),
             Self::GetLatestBlockhash
-            | Self::GetAccountInfo
             | Self::GetMultipleAccounts
             | Self::GetProgramAccounts
             | Self::GetTokenAccountsByOwner => result.get("context")?.get("slot")?.as_u64(),
@@ -235,6 +226,13 @@ fn pick_batch(pool: &[String], seed: Option<u64>) -> Vec<String> {
     }
 }
 
+fn clock_slot_from_value(value: &Value) -> Option<u64> {
+    let b64 = value.get("data")?.as_array()?.first()?.as_str()?;
+    let bytes = base64::engine::general_purpose::STANDARD.decode(b64).ok()?;
+    let slot: [u8; 8] = bytes.get(0..8)?.try_into().ok()?;
+    Some(u64::from_le_bytes(slot))
+}
+
 fn value_of(result: &Value) -> &Value {
     result.get("value").unwrap_or(result)
 }
@@ -263,19 +261,23 @@ mod tests {
     }
 
     #[test]
-    fn account_read_falls_back_then_rotates_over_live_accounts() {
+    fn account_read_probes_the_clock_sysvar() {
         let params = RpcMethod::GetAccountInfo
             .build_params(&RequestContext::default())
             .expect("account read always builds");
-        assert_eq!(params[0], json!(FALLBACK_ACCOUNT));
+        assert_eq!(params[0], json!(CLOCK_SYSVAR));
+        assert_eq!(params[1]["encoding"], json!("base64"));
+    }
 
-        let ctx = RequestContext {
-            tip_slot: Some(3),
-            recent_accounts: vec!["A".into(), "B".into(), "C".into()],
-            ..RequestContext::default()
-        };
-        let params = RpcMethod::GetAccountInfo.build_params(&ctx).unwrap();
-        assert_eq!(params[0], json!("A"));
+    #[test]
+    fn account_info_uses_the_data_slot_not_the_envelope_slot() {
+        let slot: u64 = 123_456;
+        let mut data = slot.to_le_bytes().to_vec();
+        data.extend_from_slice(&[0u8; 32]);
+        let b64 = base64::engine::general_purpose::STANDARD.encode(&data);
+        let result = json!({ "context": { "slot": 999 }, "value": { "data": [b64, "base64"] } });
+        assert!(RpcMethod::GetAccountInfo.is_valid_result(&result));
+        assert_eq!(RpcMethod::GetAccountInfo.observed_slot(&result), Some(slot));
     }
 
     #[test]
@@ -342,8 +344,8 @@ mod tests {
 
     #[test]
     fn empty_or_truncated_responses_are_invalid() {
-        assert!(RpcMethod::GetAccountInfo.is_valid_result(&json!({ "value": null })));
-        assert!(RpcMethod::GetAccountInfo
+        assert!(!RpcMethod::GetAccountInfo.is_valid_result(&json!({ "value": null })));
+        assert!(!RpcMethod::GetAccountInfo
             .is_valid_result(&json!({ "value": { "data": ["", "base64"] } })));
         assert!(!RpcMethod::GetAccountInfo.is_valid_result(&json!({ "context": { "slot": 1 } })));
         assert!(!RpcMethod::GetBlockRecent

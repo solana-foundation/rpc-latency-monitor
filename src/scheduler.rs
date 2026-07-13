@@ -8,7 +8,7 @@ use crate::config::CheckConfig;
 use crate::metrics::Metrics;
 use crate::providers::ProviderEndpoint;
 use crate::reference_slot::ReferenceSlot;
-use crate::rpc::{CallResult, RequestContext, RpcClient};
+use crate::rpc::{CallResult, CallStatus, ErrorKind, RequestContext, RpcClient};
 
 pub fn spawn_checks(
     endpoints: &[ProviderEndpoint],
@@ -16,6 +16,7 @@ pub fn spawn_checks(
     client: Arc<RpcClient>,
     metrics: Metrics,
     reference: ReferenceSlot,
+    max_slot_lag: u64,
 ) {
     let shared = SharedState::default();
     for endpoint in endpoints {
@@ -28,6 +29,7 @@ pub fn spawn_checks(
                 metrics: metrics.clone(),
                 reference: reference.clone(),
                 shared: shared.clone(),
+                max_slot_lag,
             };
             tokio::spawn(task.run());
         }
@@ -42,6 +44,7 @@ struct CheckTask {
     metrics: Metrics,
     reference: ReferenceSlot,
     shared: SharedState,
+    max_slot_lag: u64,
 }
 
 impl CheckTask {
@@ -65,19 +68,37 @@ impl CheckTask {
 
     fn record(&self, result: &CallResult) {
         let method = self.check.method;
-        self.metrics.record_call(&self.provider, method, result);
-        if let Some(slot) = result.observed_slot {
-            self.reference.observe(slot);
-            if let Some(lag) = self.reference.lag_for(slot) {
-                self.metrics.record_slot_lag(&self.provider, method, lag);
+        let status = if self.is_stale(result) {
+            CallStatus::Error(ErrorKind::Stale)
+        } else {
+            result.status
+        };
+        self.metrics
+            .record_call(&self.provider, method, result, status);
+
+        if status.is_success() {
+            if let Some(slot) = result.observed_slot {
+                self.reference.observe(slot);
+                if let Some(lag) = self.reference.lag_for(slot) {
+                    self.metrics.record_slot_lag(&self.provider, method, lag);
+                }
+            }
+            if let Some(signature) = &result.signature {
+                self.shared.set_recent_signature(signature.clone());
+            }
+            if !result.accounts.is_empty() {
+                self.shared.set_recent_accounts(result.accounts.clone());
             }
         }
-        if let Some(signature) = &result.signature {
-            self.shared.set_recent_signature(signature.clone());
-        }
-        if !result.accounts.is_empty() {
-            self.shared.set_recent_accounts(result.accounts.clone());
-        }
+    }
+
+    fn is_stale(&self, result: &CallResult) -> bool {
+        result.status.is_success()
+            && stale_by_lag(
+                self.reference.current(),
+                result.observed_slot,
+                self.max_slot_lag,
+            )
     }
 
     fn next_delay(&self) -> Duration {
@@ -121,9 +142,23 @@ impl SharedState {
     }
 }
 
+fn stale_by_lag(tip: Option<u64>, observed: Option<u64>, max_lag: u64) -> bool {
+    matches!((tip, observed), (Some(t), Some(s)) if t.saturating_sub(s) > max_lag)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stale_only_when_lag_exceeds_budget() {
+        assert!(!stale_by_lag(None, Some(100), 150));
+        assert!(!stale_by_lag(Some(1000), None, 150));
+        assert!(!stale_by_lag(Some(1000), Some(900), 150));
+        assert!(!stale_by_lag(Some(1000), Some(850), 150));
+        assert!(stale_by_lag(Some(1000), Some(700), 150));
+        assert!(!stale_by_lag(Some(500), Some(900), 150));
+    }
 
     #[test]
     fn shared_state_round_trips_recent_signature() {

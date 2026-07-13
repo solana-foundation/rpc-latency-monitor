@@ -39,6 +39,7 @@ pub enum ErrorKind {
     RpcError(i64),
     Decode,
     Empty,
+    Stale,
 }
 
 impl CallStatus {
@@ -74,6 +75,7 @@ impl ErrorKind {
             Self::RpcError(_) => "rpc_error",
             Self::Decode => "decode",
             Self::Empty => "empty",
+            Self::Stale => "stale",
         }
     }
 }
