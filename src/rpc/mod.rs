@@ -71,7 +71,12 @@ impl ErrorKind {
         match self {
             Self::Timeout => "timeout",
             Self::Transport => "transport",
-            Self::HttpStatus(_) => "http_status",
+            Self::HttpStatus(code) => match code {
+                429 => "http_429",
+                400..=499 => "http_4xx",
+                500..=599 => "http_5xx",
+                _ => "http_status",
+            },
             Self::RpcError(_) => "rpc_error",
             Self::Decode => "decode",
             Self::Empty => "empty",
@@ -277,6 +282,15 @@ mod tests {
             RpcMethod::GetSlot,
         );
         assert_eq!(parsed.status, CallStatus::Error(ErrorKind::HttpStatus(500)));
+    }
+
+    #[test]
+    fn http_error_kind_buckets_by_code() {
+        assert_eq!(ErrorKind::HttpStatus(429).as_str(), "http_429");
+        assert_eq!(ErrorKind::HttpStatus(400).as_str(), "http_4xx");
+        assert_eq!(ErrorKind::HttpStatus(403).as_str(), "http_4xx");
+        assert_eq!(ErrorKind::HttpStatus(503).as_str(), "http_5xx");
+        assert_eq!(ErrorKind::Stale.as_str(), "stale");
     }
 
     #[test]
