@@ -5,7 +5,7 @@ use prometheus::{
 };
 
 use crate::rpc::methods::RpcMethod;
-use crate::rpc::CallResult;
+use crate::rpc::{CallResult, CallStatus};
 
 const LATENCY_BUCKETS: &[f64] = &[
     0.001, 0.002, 0.003, 0.004, 0.005, 0.006, 0.007, 0.008, 0.009, 0.01, 0.0125, 0.015, 0.0175,
@@ -20,6 +20,7 @@ pub struct Metrics {
     slot_lag: IntGaugeVec,
     requests: IntCounterVec,
     up: IntGaugeVec,
+    reference_check: IntCounterVec,
 }
 
 impl Metrics {
@@ -47,11 +48,19 @@ impl Metrics {
             Opts::new("rpc_up", "Whether the provider's last check succeeded"),
             &["provider"],
         )?;
+        let reference_check = IntCounterVec::new(
+            Opts::new(
+                "rpc_reference_check_total",
+                "Provider's finalized getBlock blockhash vs the trusted reference, by outcome",
+            ),
+            &["provider", "result"],
+        )?;
 
         registry.register(Box::new(latency.clone()))?;
         registry.register(Box::new(slot_lag.clone()))?;
         registry.register(Box::new(requests.clone()))?;
         registry.register(Box::new(up.clone()))?;
+        registry.register(Box::new(reference_check.clone()))?;
 
         Ok(Self {
             registry,
@@ -59,23 +68,36 @@ impl Metrics {
             slot_lag,
             requests,
             up,
+            reference_check,
         })
     }
 
-    pub fn record_call(&self, provider: &str, method: RpcMethod, result: &CallResult) {
+    pub fn record_reference_check(&self, provider: &str, result: &str) {
+        self.reference_check
+            .with_label_values(&[provider, result])
+            .inc();
+    }
+
+    pub fn record_call(
+        &self,
+        provider: &str,
+        method: RpcMethod,
+        result: &CallResult,
+        status: CallStatus,
+    ) {
         let method = method.label();
-        let status = result.status.label();
-        let error_kind = result.status.error_kind().unwrap_or("none");
+        let status_label = status.label();
+        let error_kind = status.error_kind().unwrap_or("none");
 
         self.latency
-            .with_label_values(&[provider, method, status])
+            .with_label_values(&[provider, method, status_label])
             .observe(result.latency.as_secs_f64());
         self.requests
-            .with_label_values(&[provider, method, status, error_kind])
+            .with_label_values(&[provider, method, status_label, error_kind])
             .inc();
         self.up
             .with_label_values(&[provider])
-            .set(i64::from(result.status.is_success()));
+            .set(i64::from(status.is_success()));
     }
 
     pub fn record_slot_lag(&self, provider: &str, method: RpcMethod, lag: u64) {
@@ -110,11 +132,17 @@ mod tests {
     #[test]
     fn encodes_recorded_calls_with_region_label() {
         let metrics = Metrics::new("test-region").unwrap();
-        metrics.record_call("helius", RpcMethod::GetSlot, &result(CallStatus::Success));
+        metrics.record_call(
+            "helius",
+            RpcMethod::GetSlot,
+            &result(CallStatus::Success),
+            CallStatus::Success,
+        );
         metrics.record_call(
             "triton",
             RpcMethod::GetSlot,
             &result(CallStatus::Error(ErrorKind::Timeout)),
+            CallStatus::Error(ErrorKind::Timeout),
         );
 
         let output = metrics.encode().unwrap();
@@ -129,7 +157,12 @@ mod tests {
     fn records_slot_lag_and_up_gauge() {
         let metrics = Metrics::new("test").unwrap();
         metrics.record_slot_lag("helius", RpcMethod::GetSlot, 7);
-        metrics.record_call("helius", RpcMethod::GetSlot, &result(CallStatus::Success));
+        metrics.record_call(
+            "helius",
+            RpcMethod::GetSlot,
+            &result(CallStatus::Success),
+            CallStatus::Success,
+        );
 
         let output = metrics.encode().unwrap();
         assert!(output.contains("rpc_slot_lag"));

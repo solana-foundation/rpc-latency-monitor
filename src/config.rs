@@ -22,6 +22,41 @@ pub struct Config {
     pub checks: Vec<CheckConfig>,
     #[serde(with = "humantime_serde", default = "default_request_timeout")]
     pub request_timeout: Duration,
+    #[serde(default = "default_max_slot_lag")]
+    pub max_slot_lag: u64,
+    #[serde(default)]
+    pub reference_check: ReferenceCheckConfig,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ReferenceCheckConfig {
+    #[serde(default)]
+    pub rpc_url: String,
+    #[serde(default)]
+    pub exclude_provider: Option<String>,
+    #[serde(with = "humantime_serde", default = "default_reference_interval")]
+    pub interval: Duration,
+    #[serde(default = "default_reference_depth")]
+    pub depth: u64,
+}
+
+impl Default for ReferenceCheckConfig {
+    fn default() -> Self {
+        Self {
+            rpc_url: String::new(),
+            exclude_provider: None,
+            interval: default_reference_interval(),
+            depth: default_reference_depth(),
+        }
+    }
+}
+
+const fn default_reference_interval() -> Duration {
+    Duration::from_secs(300)
+}
+
+const fn default_reference_depth() -> u64 {
+    64
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -107,6 +142,10 @@ impl Default for ReferenceSlotConfig {
 
 const fn default_request_timeout() -> Duration {
     Duration::from_secs(10)
+}
+
+const fn default_max_slot_lag() -> u64 {
+    150
 }
 
 const fn default_poll_interval() -> Duration {

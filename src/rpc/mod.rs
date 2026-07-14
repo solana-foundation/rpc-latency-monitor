@@ -39,6 +39,7 @@ pub enum ErrorKind {
     RpcError(i64),
     Decode,
     Empty,
+    Stale,
 }
 
 impl CallStatus {
@@ -70,10 +71,16 @@ impl ErrorKind {
         match self {
             Self::Timeout => "timeout",
             Self::Transport => "transport",
-            Self::HttpStatus(_) => "http_status",
+            Self::HttpStatus(code) => match code {
+                429 => "http_429",
+                400..=499 => "http_4xx",
+                500..=599 => "http_5xx",
+                _ => "http_status",
+            },
             Self::RpcError(_) => "rpc_error",
             Self::Decode => "decode",
             Self::Empty => "empty",
+            Self::Stale => "stale",
         }
     }
 }
@@ -96,6 +103,21 @@ impl RpcClient {
             http,
             next_id: AtomicU64::new(1),
         })
+    }
+
+    pub async fn raw_call(&self, url: &str, method: &str, params: Value) -> Option<Value> {
+        let body = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": self.next_id.fetch_add(1, Ordering::Relaxed),
+            "method": method,
+            "params": params,
+        });
+        let response = self.http.post(url).json(&body).send().await.ok()?;
+        if !response.status().is_success() {
+            return None;
+        }
+        let json: Value = response.json().await.ok()?;
+        json.get("result").cloned()
     }
 
     pub async fn call(
@@ -275,6 +297,15 @@ mod tests {
             RpcMethod::GetSlot,
         );
         assert_eq!(parsed.status, CallStatus::Error(ErrorKind::HttpStatus(500)));
+    }
+
+    #[test]
+    fn http_error_kind_buckets_by_code() {
+        assert_eq!(ErrorKind::HttpStatus(429).as_str(), "http_429");
+        assert_eq!(ErrorKind::HttpStatus(400).as_str(), "http_4xx");
+        assert_eq!(ErrorKind::HttpStatus(403).as_str(), "http_4xx");
+        assert_eq!(ErrorKind::HttpStatus(503).as_str(), "http_5xx");
+        assert_eq!(ErrorKind::Stale.as_str(), "stale");
     }
 
     #[test]
