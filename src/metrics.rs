@@ -20,6 +20,7 @@ pub struct Metrics {
     slot_lag: IntGaugeVec,
     requests: IntCounterVec,
     up: IntGaugeVec,
+    reference_check: IntCounterVec,
 }
 
 impl Metrics {
@@ -47,11 +48,19 @@ impl Metrics {
             Opts::new("rpc_up", "Whether the provider's last check succeeded"),
             &["provider"],
         )?;
+        let reference_check = IntCounterVec::new(
+            Opts::new(
+                "rpc_reference_check_total",
+                "Provider's finalized getBlock blockhash vs the trusted reference, by outcome",
+            ),
+            &["provider", "result"],
+        )?;
 
         registry.register(Box::new(latency.clone()))?;
         registry.register(Box::new(slot_lag.clone()))?;
         registry.register(Box::new(requests.clone()))?;
         registry.register(Box::new(up.clone()))?;
+        registry.register(Box::new(reference_check.clone()))?;
 
         Ok(Self {
             registry,
@@ -59,7 +68,14 @@ impl Metrics {
             slot_lag,
             requests,
             up,
+            reference_check,
         })
+    }
+
+    pub fn record_reference_check(&self, provider: &str, result: &str) {
+        self.reference_check
+            .with_label_values(&[provider, result])
+            .inc();
     }
 
     pub fn record_call(

@@ -105,6 +105,21 @@ impl RpcClient {
         })
     }
 
+    pub async fn raw_call(&self, url: &str, method: &str, params: Value) -> Option<Value> {
+        let body = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": self.next_id.fetch_add(1, Ordering::Relaxed),
+            "method": method,
+            "params": params,
+        });
+        let response = self.http.post(url).json(&body).send().await.ok()?;
+        if !response.status().is_success() {
+            return None;
+        }
+        let json: Value = response.json().await.ok()?;
+        json.get("result").cloned()
+    }
+
     pub async fn call(
         &self,
         url: &str,

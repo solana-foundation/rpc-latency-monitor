@@ -23,6 +23,17 @@ reference_slot:
   # endpoint: "https://api.mainnet-beta.solana.com"
   # poll_interval: "1s"
 
+# Cross-check each provider's finalized getBlock blockhash against a trusted
+# reference RPC (ground truth): a blockhash is unforgeable, so a mismatch means
+# wrong/fabricated data. The reference is used only for correctness, never for
+# latency, so a slow/lagging reference never distorts the numbers. Disabled
+# unless rpc_url is set.
+# reference_check:
+#   rpc_url: "https://beta.helius-rpc.com/?api-key=${HELIUS_API_KEY}"
+#   exclude_provider: helius   # don't judge the reference against itself
+#   interval: "5m"
+#   depth: 64                  # checked slot = reference finalized tip - depth
+
 # RPC providers to benchmark. `url` may contain a ${ENV_VAR} placeholder; the
 # whole api-key/url secret is supplied via the environment.
 providers:

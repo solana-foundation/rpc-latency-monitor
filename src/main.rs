@@ -10,7 +10,7 @@ use rpc_latency_monitor::metrics::Metrics;
 use rpc_latency_monitor::providers;
 use rpc_latency_monitor::reference_slot::{poll_reference_endpoint, ReferenceSlot};
 use rpc_latency_monitor::rpc::RpcClient;
-use rpc_latency_monitor::{scheduler, server};
+use rpc_latency_monitor::{reference_check, scheduler, server};
 
 #[derive(Parser)]
 #[command(name = "rpc-latency-monitor")]
@@ -43,10 +43,16 @@ async fn main() -> anyhow::Result<()> {
     scheduler::spawn_checks(
         &endpoints,
         &config.checks,
-        client,
+        client.clone(),
         metrics.clone(),
         reference,
         config.max_slot_lag,
+    );
+    reference_check::spawn_reference_check(
+        &endpoints,
+        client,
+        metrics.clone(),
+        config.reference_check.clone(),
     );
 
     server::serve(config.server.bind, metrics).await
