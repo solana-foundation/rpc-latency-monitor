@@ -153,7 +153,7 @@
       ]
     },
     {
-      "id": 9,
+      "id": 11,
       "type": "bargauge",
       "title": "Success rate by provider ($method, $geo)",
       "description": "Share of valid, fresh responses per provider. Errors and stale/cached data are excluded from the latency and win % panels, so a low value here means those panels are unreliable for that provider.",
