@@ -10,7 +10,7 @@ use rpc_latency_monitor::metrics::Metrics;
 use rpc_latency_monitor::providers;
 use rpc_latency_monitor::reference_slot::{poll_reference_endpoint, ReferenceSlot};
 use rpc_latency_monitor::rpc::RpcClient;
-use rpc_latency_monitor::{reference_check, scheduler, server};
+use rpc_latency_monitor::{geo, reference_check, scheduler, server};
 
 #[derive(Parser)]
 #[command(name = "rpc-latency-monitor")]
@@ -27,7 +27,7 @@ async fn main() -> anyhow::Result<()> {
     let config = Config::load(&args.config)?;
     let endpoints = providers::resolve_endpoints(&config.providers)?;
 
-    let metrics = Metrics::new(&config.region)?;
+    let metrics = Metrics::new(&config.region, geo::geo_for(&config.region))?;
     let client = Arc::new(RpcClient::new(config.request_timeout)?);
     let reference = ReferenceSlot::new();
 
