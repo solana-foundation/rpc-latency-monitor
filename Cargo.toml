@@ -25,6 +25,7 @@ humantime-serde = "1"
 prometheus = "0.14"
 
 base64 = "0.22"
+bs58 = "0.5"
 
 # Observability
 tracing = "0.1"

@@ -133,7 +133,10 @@ impl RpcMethod {
                 .as_array()
                 .is_some_and(|a| a.iter().any(|entry| !entry.is_null())),
             Self::GetProgramAccounts | Self::GetTokenAccountsByOwner => {
-                value_of(result).as_array().is_some_and(|a| !a.is_empty())
+                let owner = bs58::decode(GPA_TOKEN_OWNER).into_vec().unwrap_or_default();
+                value_of(result).as_array().is_some_and(|a| {
+                    !a.is_empty() && a.iter().all(|e| gpa_account_matches(e, &owner))
+                })
             }
             Self::GetBlockRecent | Self::GetBlockArchival => {
                 non_empty_str(result.get("blockhash"))
@@ -231,6 +234,26 @@ fn clock_slot_from_value(value: &Value) -> Option<u64> {
     let bytes = base64::engine::general_purpose::STANDARD.decode(b64).ok()?;
     let slot: [u8; 8] = bytes.get(0..8)?.try_into().ok()?;
     Some(u64::from_le_bytes(slot))
+}
+
+fn gpa_account_matches(entry: &Value, owner: &[u8]) -> bool {
+    let account = entry.get("account").unwrap_or(entry);
+    if account.get("owner").and_then(Value::as_str) != Some(TOKEN_PROGRAM) {
+        return false;
+    }
+    let Some(b64) = account
+        .get("data")
+        .and_then(Value::as_array)
+        .and_then(|a| a.first())
+        .and_then(Value::as_str)
+    else {
+        return false;
+    };
+    let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(b64) else {
+        return false;
+    };
+    let off = TOKEN_ACCOUNT_OWNER_OFFSET as usize;
+    bytes.len() == TOKEN_ACCOUNT_LEN as usize && bytes.get(off..off + 32) == Some(owner)
 }
 
 fn value_of(result: &Value) -> &Value {
@@ -340,6 +363,24 @@ mod tests {
         };
         let params = RpcMethod::GetMultipleAccounts.build_params(&ctx).unwrap();
         assert_eq!(params[0].as_array().unwrap().len(), MULTI_ACCOUNT_BATCH);
+    }
+
+    #[test]
+    fn gpa_rejects_garbage_that_doesnt_match_the_filter() {
+        let owner = bs58::decode(GPA_TOKEN_OWNER).into_vec().unwrap();
+        let off = TOKEN_ACCOUNT_OWNER_OFFSET as usize;
+        let mut data = vec![0u8; TOKEN_ACCOUNT_LEN as usize];
+        data[off..off + 32].copy_from_slice(&owner);
+        let good = base64::engine::general_purpose::STANDARD.encode(&data);
+        let ok = json!({ "value": [ { "account": { "owner": TOKEN_PROGRAM, "data": [good, "base64"] } } ] });
+        assert!(RpcMethod::GetProgramAccounts.is_valid_result(&ok));
+
+        let junk =
+            base64::engine::general_purpose::STANDARD.encode(vec![7u8; TOKEN_ACCOUNT_LEN as usize]);
+        let bad = json!({ "value": [ { "account": { "owner": TOKEN_PROGRAM, "data": [junk, "base64"] } } ] });
+        assert!(!RpcMethod::GetProgramAccounts.is_valid_result(&bad));
+
+        assert!(!RpcMethod::GetProgramAccounts.is_valid_result(&json!({ "value": [] })));
     }
 
     #[test]
