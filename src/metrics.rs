@@ -24,8 +24,11 @@ pub struct Metrics {
 }
 
 impl Metrics {
-    pub fn new(region: &str) -> Result<Self, prometheus::Error> {
-        let const_labels = HashMap::from([("region".to_string(), region.to_string())]);
+    pub fn new(region: &str, geo: &str) -> Result<Self, prometheus::Error> {
+        let const_labels = HashMap::from([
+            ("region".to_string(), region.to_string()),
+            ("geo".to_string(), geo.to_string()),
+        ]);
         let registry = Registry::new_custom(None, Some(const_labels))?;
 
         let latency = HistogramVec::new(
@@ -131,7 +134,7 @@ mod tests {
 
     #[test]
     fn encodes_recorded_calls_with_region_label() {
-        let metrics = Metrics::new("test-region").unwrap();
+        let metrics = Metrics::new("test-region", "us-east").unwrap();
         metrics.record_call(
             "helius",
             RpcMethod::GetSlot,
@@ -155,7 +158,7 @@ mod tests {
 
     #[test]
     fn records_slot_lag_and_up_gauge() {
-        let metrics = Metrics::new("test").unwrap();
+        let metrics = Metrics::new("test", "us-east").unwrap();
         metrics.record_slot_lag("helius", RpcMethod::GetSlot, 7);
         metrics.record_call(
             "helius",
