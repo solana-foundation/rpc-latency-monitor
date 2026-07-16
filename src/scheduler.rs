@@ -53,6 +53,7 @@ impl CheckTask {
             let ctx = RequestContext {
                 tip_slot: self.reference.current(),
                 recent_signature: self.shared.recent_signature(),
+                archival_signature: self.shared.archival_signature(),
                 recent_accounts: self.shared.recent_accounts(),
             };
             if let Some(result) = self
@@ -86,6 +87,9 @@ impl CheckTask {
             if let Some(signature) = &result.signature {
                 self.shared.set_recent_signature(signature.clone());
             }
+            if let Some(signature) = &result.archival_signature {
+                self.shared.set_archival_signature(signature.clone());
+            }
             if !result.accounts.is_empty() {
                 self.shared.set_recent_accounts(result.accounts.clone());
             }
@@ -114,6 +118,7 @@ impl CheckTask {
 #[derive(Clone, Default)]
 struct SharedState {
     recent_signature: Arc<Mutex<Option<String>>>,
+    archival_signature: Arc<Mutex<Option<String>>>,
     recent_accounts: Arc<Mutex<Vec<String>>>,
 }
 
@@ -124,6 +129,16 @@ impl SharedState {
 
     fn set_recent_signature(&self, signature: String) {
         if let Ok(mut guard) = self.recent_signature.lock() {
+            *guard = Some(signature);
+        }
+    }
+
+    fn archival_signature(&self) -> Option<String> {
+        self.archival_signature.lock().ok()?.clone()
+    }
+
+    fn set_archival_signature(&self, signature: String) {
+        if let Ok(mut guard) = self.archival_signature.lock() {
             *guard = Some(signature);
         }
     }
