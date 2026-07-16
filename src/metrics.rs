@@ -100,7 +100,7 @@ impl Metrics {
             .inc();
         self.up
             .with_label_values(&[provider])
-            .set(i64::from(status.is_success()));
+            .set(i64::from(!status.is_error()));
     }
 
     pub fn record_slot_lag(&self, provider: &str, method: RpcMethod, lag: u64) {
@@ -155,6 +155,24 @@ mod tests {
         assert!(output.contains("region=\"test-region\""));
         assert!(output.contains("status=\"success\""));
         assert!(output.contains("error_kind=\"timeout\""));
+    }
+
+    #[test]
+    fn skipped_slot_keeps_the_provider_up() {
+        let metrics = Metrics::new("test", "us-east").unwrap();
+        metrics.record_call(
+            "triton",
+            RpcMethod::GetBlockRecent,
+            &result(CallStatus::Skipped),
+            CallStatus::Skipped,
+        );
+        let output = metrics.encode().unwrap();
+        assert!(output.contains("status=\"skipped\""));
+        let up_line = output
+            .lines()
+            .find(|l| l.starts_with("rpc_up{") && l.contains("provider=\"triton\""))
+            .unwrap();
+        assert!(up_line.ends_with(" 1"));
     }
 
     #[test]
