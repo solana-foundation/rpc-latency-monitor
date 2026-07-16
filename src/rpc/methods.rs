@@ -13,6 +13,7 @@ const MULTI_ACCOUNTS: [&str; 4] = [USDC_MINT, USDT_MINT, WSOL_MINT, TOKEN_PROGRA
 const FALLBACK_ADDRESS: &str = USDC_MINT;
 
 const CLOCK_SYSVAR: &str = "SysvarC1ock11111111111111111111111111111111";
+const VOTE_PROGRAM: &str = "Vote111111111111111111111111111111111111111";
 const GPA_TOKEN_OWNER: &str = "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM";
 const TOKEN_ACCOUNT_LEN: u64 = 165;
 const TOKEN_ACCOUNT_OWNER_OFFSET: u64 = 32;
@@ -187,6 +188,7 @@ impl RpcMethod {
             .get("transactions")?
             .as_array()?
             .iter()
+            .filter(|tx| !is_vote_transaction(tx))
             .find_map(|tx| {
                 tx.get("transaction")?
                     .get("signatures")?
@@ -225,6 +227,18 @@ impl RpcMethod {
         }
         out
     }
+}
+
+fn is_vote_transaction(tx: &Value) -> bool {
+    tx.get("transaction")
+        .and_then(|t| t.get("message"))
+        .and_then(|m| m.get("accountKeys"))
+        .and_then(Value::as_array)
+        .is_some_and(|keys| {
+            keys.iter()
+                .filter_map(Value::as_str)
+                .any(|k| k == VOTE_PROGRAM)
+        })
 }
 
 fn transaction_params(signature: String) -> Value {
@@ -484,6 +498,35 @@ mod tests {
             Some("sigA".to_string())
         );
         assert_eq!(RpcMethod::GetBlockRecent.archival_signature(&block), None);
+    }
+
+    #[test]
+    fn archival_signature_skips_vote_transactions() {
+        let block = json!({
+            "blockhash": "abc",
+            "transactions": [
+                { "transaction": { "signatures": ["voteSig"], "message": {
+                    "accountKeys": ["somevoter", VOTE_PROGRAM] } } },
+                { "transaction": { "signatures": ["userSig"], "message": {
+                    "accountKeys": ["payer", TOKEN_PROGRAM] } } },
+            ],
+        });
+        assert_eq!(
+            RpcMethod::GetBlockArchival.archival_signature(&block),
+            Some("userSig".to_string())
+        );
+
+        let only_votes = json!({
+            "blockhash": "abc",
+            "transactions": [
+                { "transaction": { "signatures": ["voteSig"], "message": {
+                    "accountKeys": [VOTE_PROGRAM] } } },
+            ],
+        });
+        assert_eq!(
+            RpcMethod::GetBlockArchival.archival_signature(&only_votes),
+            None
+        );
     }
 
     #[test]
