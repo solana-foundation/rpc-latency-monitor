@@ -37,6 +37,7 @@ pub enum RpcMethod {
     GetBlockRecent,
     GetBlockArchival,
     GetTransactionRecent,
+    GetTransactionArchival,
     GetSignaturesForAddress,
 }
 
@@ -54,6 +55,7 @@ impl RpcMethod {
             Self::GetBlockRecent => "getBlock_recent",
             Self::GetBlockArchival => "getBlock_archival",
             Self::GetTransactionRecent => "getTransaction_recent",
+            Self::GetTransactionArchival => "getTransaction_archival",
             Self::GetSignaturesForAddress => "getSignaturesForAddress",
         }
     }
@@ -69,7 +71,7 @@ impl RpcMethod {
             Self::GetProgramAccounts => "getProgramAccounts",
             Self::GetTokenAccountsByOwner => "getTokenAccountsByOwner",
             Self::GetBlockRecent | Self::GetBlockArchival => "getBlock",
-            Self::GetTransactionRecent => "getTransaction",
+            Self::GetTransactionRecent | Self::GetTransactionArchival => "getTransaction",
             Self::GetSignaturesForAddress => "getSignaturesForAddress",
         }
     }
@@ -111,14 +113,8 @@ impl RpcMethod {
                 let slot = ctx.tip_slot?.checked_sub(ARCHIVAL_SLOT_DEPTH)?;
                 block_params(slot)
             }
-            Self::GetTransactionRecent => {
-                let signature = ctx.recent_signature.clone()?;
-                json!([signature, {
-                    "encoding": "json",
-                    "commitment": "confirmed",
-                    "maxSupportedTransactionVersion": 0,
-                }])
-            }
+            Self::GetTransactionRecent => transaction_params(ctx.recent_signature.clone()?),
+            Self::GetTransactionArchival => transaction_params(ctx.archival_signature.clone()?),
         };
         Some(params)
     }
@@ -145,7 +141,11 @@ impl RpcMethod {
                         .and_then(Value::as_array)
                         .is_some_and(|a| !a.is_empty())
             }
-            Self::GetTransactionRecent => !result.is_null() && result.get("slot").is_some(),
+            Self::GetTransactionRecent | Self::GetTransactionArchival => {
+                !result.is_null()
+                    && result.get("slot").is_some()
+                    && result.get("transaction").is_some()
+            }
             Self::GetSignaturesForAddress => result.as_array().is_some_and(|a| !a.is_empty()),
         }
     }
@@ -162,6 +162,7 @@ impl RpcMethod {
             | Self::GetBlockRecent
             | Self::GetBlockArchival
             | Self::GetTransactionRecent
+            | Self::GetTransactionArchival
             | Self::GetSignaturesForAddress => None,
         }
     }
@@ -176,6 +177,24 @@ impl RpcMethod {
             .get("signature")?
             .as_str()
             .map(str::to_owned)
+    }
+
+    pub fn archival_signature(self, result: &Value) -> Option<String> {
+        if !matches!(self, Self::GetBlockArchival) {
+            return None;
+        }
+        result
+            .get("transactions")?
+            .as_array()?
+            .iter()
+            .find_map(|tx| {
+                tx.get("transaction")?
+                    .get("signatures")?
+                    .as_array()?
+                    .first()?
+                    .as_str()
+                    .map(str::to_owned)
+            })
     }
 
     pub fn recent_accounts(self, result: &Value) -> Vec<String> {
@@ -206,6 +225,14 @@ impl RpcMethod {
         }
         out
     }
+}
+
+fn transaction_params(signature: String) -> Value {
+    json!([signature, {
+        "encoding": "json",
+        "commitment": "confirmed",
+        "maxSupportedTransactionVersion": 0,
+    }])
 }
 
 fn block_params(slot: u64) -> Value {
@@ -422,6 +449,49 @@ mod tests {
             Some(7)
         );
         assert_eq!(RpcMethod::GetHealth.observed_slot(&json!("ok")), None);
+    }
+
+    #[test]
+    fn archival_transaction_needs_a_harvested_archival_signature() {
+        assert!(RpcMethod::GetTransactionArchival
+            .build_params(&RequestContext::default())
+            .is_none());
+        let ctx = RequestContext {
+            archival_signature: Some("oldsig".to_string()),
+            ..RequestContext::default()
+        };
+        let params = RpcMethod::GetTransactionArchival
+            .build_params(&ctx)
+            .unwrap();
+        assert_eq!(params[0], json!("oldsig"));
+        assert_eq!(
+            RpcMethod::GetTransactionArchival.rpc_name(),
+            "getTransaction"
+        );
+    }
+
+    #[test]
+    fn archival_signature_is_harvested_only_from_archival_blocks() {
+        let block = json!({
+            "blockhash": "abc",
+            "transactions": [
+                { "transaction": { "signatures": ["sigA"], "message": {} } },
+                { "transaction": { "signatures": ["sigB"], "message": {} } },
+            ],
+        });
+        assert_eq!(
+            RpcMethod::GetBlockArchival.archival_signature(&block),
+            Some("sigA".to_string())
+        );
+        assert_eq!(RpcMethod::GetBlockRecent.archival_signature(&block), None);
+    }
+
+    #[test]
+    fn archival_transaction_rejects_a_response_missing_the_transaction() {
+        assert!(!RpcMethod::GetTransactionArchival.is_valid_result(&json!(null)));
+        assert!(!RpcMethod::GetTransactionArchival.is_valid_result(&json!({ "slot": 1 })));
+        assert!(RpcMethod::GetTransactionArchival
+            .is_valid_result(&json!({ "slot": 1, "transaction": {} })));
     }
 
     #[test]

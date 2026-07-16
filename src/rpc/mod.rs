@@ -13,6 +13,7 @@ use crate::rpc::methods::RpcMethod;
 pub struct RequestContext {
     pub tip_slot: Option<u64>,
     pub recent_signature: Option<String>,
+    pub archival_signature: Option<String>,
     pub recent_accounts: Vec<String>,
 }
 
@@ -22,6 +23,7 @@ pub struct CallResult {
     pub status: CallStatus,
     pub observed_slot: Option<u64>,
     pub signature: Option<String>,
+    pub archival_signature: Option<String>,
     pub accounts: Vec<String>,
 }
 
@@ -148,6 +150,7 @@ impl RpcClient {
                     status: CallStatus::Error(send_error_kind(&error)),
                     observed_slot: None,
                     signature: None,
+                    archival_signature: None,
                     accounts: Vec::new(),
                 });
             }
@@ -166,6 +169,7 @@ impl RpcClient {
             status: parsed.status,
             observed_slot: parsed.observed_slot,
             signature: parsed.signature,
+            archival_signature: parsed.archival_signature,
             accounts: parsed.accounts,
         })
     }
@@ -175,6 +179,7 @@ struct Parsed {
     status: CallStatus,
     observed_slot: Option<u64>,
     signature: Option<String>,
+    archival_signature: Option<String>,
     accounts: Vec<String>,
 }
 
@@ -184,6 +189,7 @@ impl Parsed {
             status: CallStatus::Error(kind),
             observed_slot: None,
             signature: None,
+            archival_signature: None,
             accounts: Vec::new(),
         }
     }
@@ -218,6 +224,7 @@ fn classify(status: StatusCode, body: &[u8], method: RpcMethod) -> Parsed {
         status: CallStatus::Success,
         observed_slot: method.observed_slot(result),
         signature: method.recent_signature(result),
+        archival_signature: method.archival_signature(result),
         accounts: method.recent_accounts(result),
     }
 }

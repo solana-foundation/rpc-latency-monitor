@@ -83,6 +83,10 @@ checks:
     interval: "30s"
     jitter: "5s"
     timeout: "30s"
+  - method: get_transaction_archival
+    interval: "30s"
+    jitter: "5s"
+    timeout: "30s"
 
 # Per-request timeout for outbound RPC calls.
 request_timeout: "10s"
