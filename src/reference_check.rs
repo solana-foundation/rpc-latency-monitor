@@ -133,7 +133,7 @@ impl ClaimSink {
     pub fn submit(&self, provider: &str, method: RpcMethod, result: &CallResult) {
         let implausible = matches!(
             (self.node_tip(), result.observed_slot),
-            (Some(tip), Some(slot)) if slot > tip + self.margin
+            (Some(tip), Some(slot)) if slot > tip.saturating_add(self.margin)
         );
         let claim = match (&result.blockhash_claim, implausible) {
             (Some(c), _) => Claim {
@@ -166,7 +166,7 @@ impl ClaimSink {
         };
         let mut due = Vec::new();
         queue.retain(|claim| {
-            if claim.implausible || claim.slot + delay <= tip {
+            if claim.implausible || claim.slot.saturating_add(delay) <= tip {
                 due.push(claim.clone());
                 false
             } else {
