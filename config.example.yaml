@@ -25,11 +25,13 @@ reference_slot:
 
 # Verify provider responses against a trusted reference RPC (ground truth):
 # a blockhash is unforgeable, so a mismatch means wrong/fabricated data. Two
-# mechanisms, both enabled by setting rpc_url and both fail-open (a slow or
-# unreachable reference records `skipped`, never penalizes a provider):
+# mechanisms, both requiring `claim_checks: true` (or MONITOR_CLAIM_CHECKS=true)
+# AND a reference_check.rpc_url — with claim_checks false (the default) neither
+# runs, regardless of rpc_url. Both are fail-open (a slow or unreachable
+# reference records `skipped`, never penalizes a provider):
 #   1. Periodic cross-check: each provider's finalized getBlock blockhash at
 #      tip-depth vs the reference (rpc_reference_check_total).
-#   2. Claim verification (requires claim_checks: true, or MONITOR_CLAIM_CHECKS=true):
+#   2. Claim verification:
 #      successful probe responses yield claims verified against the reference
 #      node >= claim_delay_slots later, emitted as
 #      rpc_claim_check_total{provider, method, result} with result one of
