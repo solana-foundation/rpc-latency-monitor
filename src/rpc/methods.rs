@@ -307,11 +307,12 @@ fn block_params(slot: u64) -> Value {
 }
 
 fn pick_batch(pool: &[String], seed: Option<u64>) -> Vec<String> {
-    if pool.len() >= MULTI_ACCOUNT_BATCH {
+    let rotating = MULTI_ACCOUNT_BATCH - 1;
+    if pool.len() >= rotating {
         let start = (seed.unwrap_or(0) as usize) % pool.len();
-        (0..MULTI_ACCOUNT_BATCH)
-            .map(|k| pool[(start + k) % pool.len()].clone())
-            .collect()
+        let mut out = vec![FALLBACK_ADDRESS.to_owned()];
+        out.extend((0..rotating).map(|k| pool[(start + k) % pool.len()].clone()));
+        out
     } else {
         MULTI_ACCOUNTS.iter().map(|s| (*s).to_owned()).collect()
     }
@@ -506,7 +507,10 @@ mod tests {
             ..RequestContext::default()
         };
         let params = RpcMethod::GetMultipleAccounts.build_params(&ctx).unwrap();
-        assert_eq!(params[0].as_array().unwrap().len(), MULTI_ACCOUNT_BATCH);
+        let batch = params[0].as_array().unwrap();
+        assert_eq!(batch.len(), MULTI_ACCOUNT_BATCH);
+        assert_eq!(batch[0], json!(FALLBACK_ADDRESS));
+        assert!(batch[1..].iter().all(|k| k.as_str().unwrap().starts_with("acct")));
     }
 
     #[test]

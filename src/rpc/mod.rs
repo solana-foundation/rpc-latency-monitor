@@ -97,8 +97,15 @@ impl CallStatus {
         matches!(self, Self::Success)
     }
 
+    const fn is_client_side(self) -> bool {
+        matches!(self, Self::Error(ErrorKind::HttpStatus(400..=499)))
+    }
+
     #[inline]
     pub const fn label(self) -> &'static str {
+        if self.is_client_side() {
+            return "skipped";
+        }
         match self {
             Self::Success => "success",
             Self::Skipped => "skipped",
@@ -108,7 +115,7 @@ impl CallStatus {
 
     #[inline]
     pub const fn is_error(self) -> bool {
-        matches!(self, Self::Error(_))
+        matches!(self, Self::Error(_)) && !self.is_client_side()
     }
 
     #[inline]
@@ -132,7 +139,15 @@ impl ErrorKind {
                 500..=599 => "http_5xx",
                 _ => "http_status",
             },
-            Self::RpcError(_) => "rpc_error",
+            Self::RpcError(code) => match code {
+                -32004 => "rpc_block_unavailable",
+                -32005 => "rpc_node_unhealthy",
+                -32007 | -32009 => "rpc_slot_skipped",
+                -32011 => "rpc_tx_history_unavailable",
+                -32601 => "rpc_method_not_found",
+                -32602 => "rpc_invalid_params",
+                _ => "rpc_error",
+            },
             Self::Decode => "decode",
             Self::Empty => "empty",
             Self::Stale => "stale",
@@ -443,6 +458,38 @@ mod tests {
         assert_eq!(ErrorKind::HttpStatus(403).as_str(), "http_4xx");
         assert_eq!(ErrorKind::HttpStatus(503).as_str(), "http_5xx");
         assert_eq!(ErrorKind::Stale.as_str(), "stale");
+    }
+
+    #[test]
+    fn known_rpc_codes_get_named_error_kinds() {
+        assert_eq!(ErrorKind::RpcError(-32004).as_str(), "rpc_block_unavailable");
+        assert_eq!(ErrorKind::RpcError(-32005).as_str(), "rpc_node_unhealthy");
+        assert_eq!(ErrorKind::RpcError(-32007).as_str(), "rpc_slot_skipped");
+        assert_eq!(ErrorKind::RpcError(-32009).as_str(), "rpc_slot_skipped");
+        assert_eq!(
+            ErrorKind::RpcError(-32011).as_str(),
+            "rpc_tx_history_unavailable"
+        );
+        assert_eq!(ErrorKind::RpcError(-32601).as_str(), "rpc_method_not_found");
+        assert_eq!(ErrorKind::RpcError(-32602).as_str(), "rpc_invalid_params");
+        assert_eq!(ErrorKind::RpcError(-99999).as_str(), "rpc_error");
+    }
+
+    #[test]
+    fn http_4xx_is_neutral_not_a_provider_error() {
+        for code in [400, 401, 403, 404, 429] {
+            let status = CallStatus::Error(ErrorKind::HttpStatus(code));
+            assert_eq!(status.label(), "skipped");
+            assert!(!status.is_error());
+            assert!(!status.is_success());
+        }
+        assert_eq!(
+            CallStatus::Error(ErrorKind::HttpStatus(429)).error_kind(),
+            Some("http_429")
+        );
+        let server_side = CallStatus::Error(ErrorKind::HttpStatus(503));
+        assert_eq!(server_side.label(), "error");
+        assert!(server_side.is_error());
     }
 
     #[test]

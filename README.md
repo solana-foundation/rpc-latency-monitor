@@ -288,9 +288,12 @@ The measurements are designed to be neutral and reproducible:
   how providers handle expensive index-style requests; it is weighted separately from the
   lightweight checks rather than averaged into them.
 
-Outcomes are classified precisely — `timeout`, `transport`, `http_status`, `rpc_error`, `decode`,
-`empty` — so a slow-but-correct provider is never conflated with a fast-but-failing (or fast-but-empty)
-one.
+Outcomes are classified precisely — see [`docs/error-kinds.md`](./docs/error-kinds.md) for the full
+label taxonomy — so a slow-but-correct provider is never conflated with a fast-but-failing (or
+fast-but-empty) one. HTTP 4xx (including 429) is neutral: it reflects the monitor's own key, request,
+or rate plan, never provider serving quality. The rotating `get_multiple_accounts` batch is anchored
+by one permanent account so a batch of since-closed ephemeral accounts can't register as a provider
+failure.
 
 ## Contributing
 
