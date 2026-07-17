@@ -25,13 +25,45 @@ pub struct CallResult {
     pub signature: Option<String>,
     pub archival_signature: Option<String>,
     pub accounts: Vec<String>,
-    pub blockhash_claim: Option<BlockhashClaim>,
+    pub claim: Option<ClaimPayload>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BlockhashClaim {
-    pub slot: u64,
-    pub blockhash: String,
+pub enum ClaimPayload {
+    Blockhash {
+        slot: u64,
+        blockhash: String,
+    },
+    Accounts {
+        slot: Option<u64>,
+        count: u64,
+        sample: Vec<AccountSample>,
+    },
+    Transaction {
+        slot: u64,
+        signature: String,
+    },
+    Clock {
+        slot: u64,
+        unix_timestamp: i64,
+    },
+}
+
+impl ClaimPayload {
+    pub fn slot(&self) -> Option<u64> {
+        match self {
+            Self::Blockhash { slot, .. }
+            | Self::Transaction { slot, .. }
+            | Self::Clock { slot, .. } => Some(*slot),
+            Self::Accounts { slot, .. } => *slot,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AccountSample {
+    pub pubkey: String,
+    pub data: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -191,7 +223,7 @@ impl RpcClient {
                     signature: None,
                     archival_signature: None,
                     accounts: Vec::new(),
-                    blockhash_claim: None,
+                    claim: None,
                 });
             }
         };
@@ -201,17 +233,9 @@ impl RpcClient {
         let latency = start.elapsed();
 
         let parsed = match body {
-            Ok(bytes) => classify(http_status, &bytes, method),
+            Ok(bytes) => classify(http_status, &bytes, method, ctx),
             Err(_) => Parsed::error(ErrorKind::Transport),
         };
-        let claim_slot = match method {
-            RpcMethod::GetBlockRecent => method.probed_slot(ctx),
-            _ => parsed.observed_slot,
-        };
-        let blockhash_claim = parsed
-            .claimed_blockhash
-            .zip(claim_slot)
-            .map(|(blockhash, slot)| BlockhashClaim { slot, blockhash });
         Some(CallResult {
             latency,
             status: parsed.status,
@@ -219,7 +243,7 @@ impl RpcClient {
             signature: parsed.signature,
             archival_signature: parsed.archival_signature,
             accounts: parsed.accounts,
-            blockhash_claim,
+            claim: parsed.claim,
         })
     }
 }
@@ -230,7 +254,7 @@ struct Parsed {
     signature: Option<String>,
     archival_signature: Option<String>,
     accounts: Vec<String>,
-    claimed_blockhash: Option<String>,
+    claim: Option<ClaimPayload>,
 }
 
 impl Parsed {
@@ -241,7 +265,7 @@ impl Parsed {
             signature: None,
             archival_signature: None,
             accounts: Vec::new(),
-            claimed_blockhash: None,
+            claim: None,
         }
     }
 }
@@ -257,7 +281,7 @@ fn send_error_kind(error: &reqwest::Error) -> ErrorKind {
     }
 }
 
-fn classify(status: StatusCode, body: &[u8], method: RpcMethod) -> Parsed {
+fn classify(status: StatusCode, body: &[u8], method: RpcMethod, ctx: &RequestContext) -> Parsed {
     if !status.is_success() {
         return Parsed::error(ErrorKind::HttpStatus(status.as_u16()));
     }
@@ -273,7 +297,7 @@ fn classify(status: StatusCode, body: &[u8], method: RpcMethod) -> Parsed {
                 signature: None,
                 archival_signature: None,
                 accounts: Vec::new(),
-                claimed_blockhash: None,
+                claim: None,
             };
         }
         return Parsed::error(ErrorKind::RpcError(code));
@@ -290,7 +314,7 @@ fn classify(status: StatusCode, body: &[u8], method: RpcMethod) -> Parsed {
         signature: method.recent_signature(result),
         archival_signature: method.archival_signature(result),
         accounts: method.recent_accounts(result),
-        claimed_blockhash: method.claimed_blockhash(result),
+        claim: method.claim_payload(result, ctx),
     }
 }
 
@@ -308,6 +332,7 @@ mod tests {
             StatusCode::OK,
             &body(r#"{"jsonrpc":"2.0","result":12345,"id":1}"#),
             RpcMethod::GetSlot,
+            &RequestContext::default(),
         );
         assert!(parsed.status.is_success());
         assert_eq!(parsed.observed_slot, Some(12345));
@@ -321,6 +346,7 @@ mod tests {
                 r#"{"jsonrpc":"2.0","result":{"context":{"slot":999},"value":{"blockhash":"abc"}},"id":1}"#,
             ),
             RpcMethod::GetLatestBlockhash,
+            &RequestContext::default(),
         );
         assert!(parsed.status.is_success());
         assert_eq!(parsed.observed_slot, Some(999));
@@ -332,6 +358,7 @@ mod tests {
             StatusCode::OK,
             &body(r#"{"jsonrpc":"2.0","result":{"context":{"slot":1},"value":[]},"id":1}"#),
             RpcMethod::GetProgramAccounts,
+            &RequestContext::default(),
         );
         assert_eq!(parsed.status, CallStatus::Error(ErrorKind::Empty));
         assert_eq!(parsed.observed_slot, None);
@@ -343,6 +370,7 @@ mod tests {
             StatusCode::OK,
             &body(r#"{"jsonrpc":"2.0","result":[{"signature":"abc"}],"id":1}"#),
             RpcMethod::GetSignaturesForAddress,
+            &RequestContext::default(),
         );
         assert_eq!(parsed.signature, Some("abc".to_string()));
     }
@@ -356,7 +384,8 @@ mod tests {
                     r#"{{"jsonrpc":"2.0","error":{{"code":{code},"message":"Slot 1 was skipped"}},"id":1}}"#
                 )),
                 RpcMethod::GetBlockRecent,
-            );
+            &RequestContext::default(),
+        );
             assert_eq!(parsed.status, CallStatus::Skipped);
         }
         assert_eq!(CallStatus::Skipped.label(), "skipped");
@@ -373,6 +402,7 @@ mod tests {
                 r#"{"jsonrpc":"2.0","error":{"code":-32007,"message":"Slot 1 was skipped"},"id":1}"#,
             ),
             RpcMethod::GetTransactionRecent,
+            &RequestContext::default(),
         );
         assert_eq!(
             parsed.status,
@@ -386,6 +416,7 @@ mod tests {
             StatusCode::OK,
             &body(r#"{"jsonrpc":"2.0","error":{"code":-32005,"message":"unhealthy"},"id":1}"#),
             RpcMethod::GetHealth,
+            &RequestContext::default(),
         );
         assert_eq!(
             parsed.status,
@@ -400,6 +431,7 @@ mod tests {
             StatusCode::INTERNAL_SERVER_ERROR,
             &body("upstream down"),
             RpcMethod::GetSlot,
+            &RequestContext::default(),
         );
         assert_eq!(parsed.status, CallStatus::Error(ErrorKind::HttpStatus(500)));
     }
@@ -415,7 +447,9 @@ mod tests {
 
     #[test]
     fn malformed_body_is_a_decode_error() {
-        let parsed = classify(StatusCode::OK, &body("not json"), RpcMethod::GetSlot);
+        let parsed = classify(StatusCode::OK, &body("not json"), RpcMethod::GetSlot,
+            &RequestContext::default(),
+        );
         assert_eq!(parsed.status, CallStatus::Error(ErrorKind::Decode));
     }
 

@@ -44,6 +44,8 @@ async fn main() -> anyhow::Result<()> {
         client.clone(),
         metrics.clone(),
         config.reference_check.clone(),
+        reference.clone(),
+        config.claim_checks,
     );
     scheduler::spawn_checks(
         &endpoints,

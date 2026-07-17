@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 
 use prometheus::{
-    Encoder, HistogramOpts, HistogramVec, IntCounterVec, IntGaugeVec, Opts, Registry, TextEncoder,
+    Encoder, HistogramOpts, HistogramVec, IntCounterVec, IntGauge, IntGaugeVec, Opts, Registry,
+    TextEncoder,
 };
 
 use crate::rpc::methods::RpcMethod;
@@ -22,6 +23,7 @@ pub struct Metrics {
     up: IntGaugeVec,
     reference_check: IntCounterVec,
     claim_check: IntCounterVec,
+    reference_node_lag: IntGauge,
 }
 
 impl Metrics {
@@ -73,7 +75,13 @@ impl Metrics {
         registry.register(Box::new(requests.clone()))?;
         registry.register(Box::new(up.clone()))?;
         registry.register(Box::new(reference_check.clone()))?;
+        let reference_node_lag = IntGauge::new(
+            "rpc_reference_node_lag",
+            "Slots the reference node trails the fleet-observed chain tip",
+        )?;
+
         registry.register(Box::new(claim_check.clone()))?;
+        registry.register(Box::new(reference_node_lag.clone()))?;
 
         Ok(Self {
             registry,
@@ -83,6 +91,7 @@ impl Metrics {
             up,
             reference_check,
             claim_check,
+            reference_node_lag,
         })
     }
 
@@ -90,6 +99,10 @@ impl Metrics {
         self.claim_check
             .with_label_values(&[provider, method.label(), result])
             .inc();
+    }
+
+    pub fn set_reference_node_lag(&self, lag: u64) {
+        self.reference_node_lag.set(lag as i64);
     }
 
     pub fn record_reference_check(&self, provider: &str, result: &str) {
@@ -147,7 +160,7 @@ mod tests {
             signature: None,
             archival_signature: None,
             accounts: Vec::new(),
-            blockhash_claim: None,
+            claim: None,
         }
     }
 
