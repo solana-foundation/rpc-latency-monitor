@@ -61,6 +61,7 @@ async fn main() -> anyhow::Result<()> {
         client,
         metrics.clone(),
         config.reference_check.clone(),
+        config.claim_checks,
     );
 
     server::serve(config.server.bind, metrics).await

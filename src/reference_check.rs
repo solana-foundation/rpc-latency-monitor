@@ -23,8 +23,9 @@ pub fn spawn_reference_check(
     client: Arc<RpcClient>,
     metrics: Metrics,
     config: ReferenceCheckConfig,
+    enabled: bool,
 ) {
-    if config.rpc_url.is_empty() {
+    if !enabled || config.rpc_url.is_empty() {
         return;
     }
     let judged: Vec<ProviderEndpoint> = endpoints
