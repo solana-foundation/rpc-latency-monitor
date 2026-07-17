@@ -222,7 +222,7 @@ fn classify(status: StatusCode, body: &[u8], method: RpcMethod) -> Parsed {
     };
     if let Some(error) = json.get("error") {
         let code = error.get("code").and_then(Value::as_i64).unwrap_or(0);
-        if matches!(code, SLOT_SKIPPED | SLOT_SKIPPED_LONG_TERM) {
+        if matches!(code, SLOT_SKIPPED | SLOT_SKIPPED_LONG_TERM) && method.probes_fixed_slot() {
             return Parsed {
                 status: CallStatus::Skipped,
                 observed_slot: None,
@@ -317,6 +317,21 @@ mod tests {
         assert_eq!(CallStatus::Skipped.error_kind(), None);
         assert!(!CallStatus::Skipped.is_success());
         assert!(!CallStatus::Skipped.is_error());
+    }
+
+    #[test]
+    fn skipped_slot_codes_stay_errors_on_non_fixed_slot_methods() {
+        let parsed = classify(
+            StatusCode::OK,
+            &body(
+                r#"{"jsonrpc":"2.0","error":{"code":-32007,"message":"Slot 1 was skipped"},"id":1}"#,
+            ),
+            RpcMethod::GetTransactionRecent,
+        );
+        assert_eq!(
+            parsed.status,
+            CallStatus::Error(ErrorKind::RpcError(-32007))
+        );
     }
 
     #[test]
