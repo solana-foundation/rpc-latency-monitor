@@ -182,7 +182,11 @@ impl RpcMethod {
                 })
             }
             Self::GetAccountInfo => {
-                let b64 = value_of(result).get("data")?.as_array()?.first()?.as_str()?;
+                let b64 = value_of(result)
+                    .get("data")?
+                    .as_array()?
+                    .first()?
+                    .as_str()?;
                 let bytes = base64::engine::general_purpose::STANDARD.decode(b64).ok()?;
                 Some(ClaimPayload::Clock {
                     slot: u64::from_le_bytes(bytes.get(0..8)?.try_into().ok()?),
@@ -510,7 +514,9 @@ mod tests {
         let batch = params[0].as_array().unwrap();
         assert_eq!(batch.len(), MULTI_ACCOUNT_BATCH);
         assert_eq!(batch[0], json!(FALLBACK_ADDRESS));
-        assert!(batch[1..].iter().all(|k| k.as_str().unwrap().starts_with("acct")));
+        assert!(batch[1..]
+            .iter()
+            .all(|k| k.as_str().unwrap().starts_with("acct")));
     }
 
     #[test]
@@ -650,7 +656,10 @@ mod tests {
         let latest = json!({ "context": { "slot": 999 }, "value": { "blockhash": "abc" } });
         assert_eq!(
             RpcMethod::GetLatestBlockhash.claim_payload(&latest, &ctx),
-            Some(ClaimPayload::Blockhash { slot: 999, blockhash: "abc".into() })
+            Some(ClaimPayload::Blockhash {
+                slot: 999,
+                blockhash: "abc".into()
+            })
         );
         let block = json!({ "blockhash": "xyz", "transactions": [{}] });
         assert_eq!(
@@ -670,8 +679,11 @@ mod tests {
             })
             .collect();
         let result = json!({ "context": { "slot": 500 }, "value": entries });
-        let Some(ClaimPayload::Accounts { slot, count, sample }) =
-            RpcMethod::GetProgramAccounts.claim_payload(&result, &RequestContext::default())
+        let Some(ClaimPayload::Accounts {
+            slot,
+            count,
+            sample,
+        }) = RpcMethod::GetProgramAccounts.claim_payload(&result, &RequestContext::default())
         else {
             panic!("expected accounts payload");
         };
@@ -691,12 +703,19 @@ mod tests {
         let tx = json!({ "slot": 777, "transaction": {} });
         assert_eq!(
             RpcMethod::GetTransactionRecent.claim_payload(&tx, &ctx),
-            Some(ClaimPayload::Transaction { slot: 777, signature: "sig".into() })
+            Some(ClaimPayload::Transaction {
+                slot: 777,
+                signature: "sig".into()
+            })
         );
-        let sigs = json!([{ "signature": "first", "slot": 888 }, { "signature": "second", "slot": 800 }]);
+        let sigs =
+            json!([{ "signature": "first", "slot": 888 }, { "signature": "second", "slot": 800 }]);
         assert_eq!(
             RpcMethod::GetSignaturesForAddress.claim_payload(&sigs, &ctx),
-            Some(ClaimPayload::Transaction { slot: 888, signature: "first".into() })
+            Some(ClaimPayload::Transaction {
+                slot: 888,
+                signature: "first".into()
+            })
         );
     }
 
@@ -711,7 +730,10 @@ mod tests {
         let result = json!({ "value": { "data": [b64, "base64"] } });
         assert_eq!(
             RpcMethod::GetAccountInfo.claim_payload(&result, &RequestContext::default()),
-            Some(ClaimPayload::Clock { slot: 123, unix_timestamp: ts })
+            Some(ClaimPayload::Clock {
+                slot: 123,
+                unix_timestamp: ts
+            })
         );
     }
 

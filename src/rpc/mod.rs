@@ -399,8 +399,8 @@ mod tests {
                     r#"{{"jsonrpc":"2.0","error":{{"code":{code},"message":"Slot 1 was skipped"}},"id":1}}"#
                 )),
                 RpcMethod::GetBlockRecent,
-            &RequestContext::default(),
-        );
+                &RequestContext::default(),
+            );
             assert_eq!(parsed.status, CallStatus::Skipped);
         }
         assert_eq!(CallStatus::Skipped.label(), "skipped");
@@ -462,7 +462,10 @@ mod tests {
 
     #[test]
     fn known_rpc_codes_get_named_error_kinds() {
-        assert_eq!(ErrorKind::RpcError(-32004).as_str(), "rpc_block_unavailable");
+        assert_eq!(
+            ErrorKind::RpcError(-32004).as_str(),
+            "rpc_block_unavailable"
+        );
         assert_eq!(ErrorKind::RpcError(-32005).as_str(), "rpc_node_unhealthy");
         assert_eq!(ErrorKind::RpcError(-32007).as_str(), "rpc_slot_skipped");
         assert_eq!(ErrorKind::RpcError(-32009).as_str(), "rpc_slot_skipped");
@@ -494,7 +497,10 @@ mod tests {
 
     #[test]
     fn malformed_body_is_a_decode_error() {
-        let parsed = classify(StatusCode::OK, &body("not json"), RpcMethod::GetSlot,
+        let parsed = classify(
+            StatusCode::OK,
+            &body("not json"),
+            RpcMethod::GetSlot,
             &RequestContext::default(),
         );
         assert_eq!(parsed.status, CallStatus::Error(ErrorKind::Decode));

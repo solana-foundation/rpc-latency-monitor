@@ -308,8 +308,15 @@ async fn judge_claim(
         },
         Some(ClaimPayload::Accounts { count, sample, .. }) => {
             let node_count = cached_gpa_count(client, url, gpa_count).await;
-            judge_accounts(client, url, *count, sample, node_count, config.claim_count_tolerance)
-                .await
+            judge_accounts(
+                client,
+                url,
+                *count,
+                sample,
+                node_count,
+                config.claim_count_tolerance,
+            )
+            .await
         }
         Some(ClaimPayload::Transaction { slot, signature }) => {
             judge_transaction(client, url, *slot, signature).await
@@ -549,7 +556,11 @@ mod tests {
     #[test]
     fn sink_flags_slots_ahead_of_the_node_tip() {
         let sink = sink_with_tip(1000);
-        sink.submit("liar", RpcMethod::GetSlot, &success_result(None, Some(1100)));
+        sink.submit(
+            "liar",
+            RpcMethod::GetSlot,
+            &success_result(None, Some(1100)),
+        );
         {
             let queue = sink.queue.lock().unwrap();
             assert_eq!(queue.len(), 1);
