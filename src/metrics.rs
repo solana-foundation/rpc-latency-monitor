@@ -21,6 +21,7 @@ pub struct Metrics {
     requests: IntCounterVec,
     up: IntGaugeVec,
     reference_check: IntCounterVec,
+    claim_check: IntCounterVec,
 }
 
 impl Metrics {
@@ -59,11 +60,20 @@ impl Metrics {
             &["provider", "result"],
         )?;
 
+        let claim_check = IntCounterVec::new(
+            Opts::new(
+                "rpc_claim_check_total",
+                "Provider (slot, blockhash) claims verified against the reference node, by outcome",
+            ),
+            &["provider", "method", "result"],
+        )?;
+
         registry.register(Box::new(latency.clone()))?;
         registry.register(Box::new(slot_lag.clone()))?;
         registry.register(Box::new(requests.clone()))?;
         registry.register(Box::new(up.clone()))?;
         registry.register(Box::new(reference_check.clone()))?;
+        registry.register(Box::new(claim_check.clone()))?;
 
         Ok(Self {
             registry,
@@ -72,7 +82,14 @@ impl Metrics {
             requests,
             up,
             reference_check,
+            claim_check,
         })
+    }
+
+    pub fn record_claim_check(&self, provider: &str, method: RpcMethod, result: &str) {
+        self.claim_check
+            .with_label_values(&[provider, method.label(), result])
+            .inc();
     }
 
     pub fn record_reference_check(&self, provider: &str, result: &str) {
@@ -130,7 +147,18 @@ mod tests {
             signature: None,
             archival_signature: None,
             accounts: Vec::new(),
+            blockhash_claim: None,
         }
+    }
+
+    #[test]
+    fn claim_check_counter_carries_method_and_result() {
+        let metrics = Metrics::new("test", "us-east").unwrap();
+        metrics.record_claim_check("helius", RpcMethod::GetLatestBlockhash, "match");
+        let output = metrics.encode().unwrap();
+        assert!(output.contains("rpc_claim_check_total"));
+        assert!(output.contains("method=\"getLatestBlockhash\""));
+        assert!(output.contains("result=\"match\""));
     }
 
     #[test]

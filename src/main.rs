@@ -40,6 +40,11 @@ async fn main() -> anyhow::Result<()> {
     );
 
     spawn_reference_poller(&config, &reference)?;
+    let claims = reference_check::spawn_claim_checker(
+        client.clone(),
+        metrics.clone(),
+        config.reference_check.clone(),
+    );
     scheduler::spawn_checks(
         &endpoints,
         &config.checks,
@@ -47,6 +52,7 @@ async fn main() -> anyhow::Result<()> {
         metrics.clone(),
         reference,
         config.max_slot_lag,
+        claims,
     );
     reference_check::spawn_reference_check(
         &endpoints,

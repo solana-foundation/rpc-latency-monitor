@@ -23,16 +23,25 @@ reference_slot:
   # endpoint: "https://api.mainnet-beta.solana.com"
   # poll_interval: "1s"
 
-# Cross-check each provider's finalized getBlock blockhash against a trusted
-# reference RPC (ground truth): a blockhash is unforgeable, so a mismatch means
-# wrong/fabricated data. The reference is used only for correctness, never for
-# latency, so a slow/lagging reference never distorts the numbers. Disabled
-# unless rpc_url is set.
+# Verify provider responses against a trusted reference RPC (ground truth):
+# a blockhash is unforgeable, so a mismatch means wrong/fabricated data. Two
+# mechanisms, both enabled by setting rpc_url and both fail-open (a slow or
+# unreachable reference records `skipped`, never penalizes a provider):
+#   1. Periodic cross-check: each provider's finalized getBlock blockhash at
+#      tip-depth vs the reference (rpc_reference_check_total).
+#   2. Claim verification: every successful getLatestBlockhash/getBlock_recent
+#      probe response yields a (slot, blockhash) claim, verified against the
+#      reference node >= claim_delay_slots later; slot-bearing responses
+#      claiming a slot more than claim_margin ahead of the reference tip are
+#      flagged implausible (rpc_claim_check_total).
+# The reference is used only for correctness, never for latency.
 # reference_check:
-#   rpc_url: "https://beta.helius-rpc.com/?api-key=${HELIUS_API_KEY}"
+#   rpc_url: "http://<reference-node>:8899"
 #   exclude_provider: helius   # don't judge the reference against itself
 #   interval: "5m"
 #   depth: 64                  # checked slot = reference finalized tip - depth
+#   claim_delay_slots: 32      # settle time before verifying a claim
+#   claim_margin: 16           # slots a claim may lead the reference tip
 
 # RPC providers to benchmark. `url` may contain a ${ENV_VAR} placeholder; the
 # whole api-key/url secret is supplied via the environment.

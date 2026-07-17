@@ -106,14 +106,7 @@ impl RpcMethod {
             Self::GetSignaturesForAddress => {
                 json!([FALLBACK_ADDRESS, { "limit": SIGNATURES_LIMIT, "commitment": "confirmed" }])
             }
-            Self::GetBlockRecent => {
-                let slot = ctx.tip_slot?.saturating_sub(BLOCK_CONFIRMATION_DEPTH);
-                block_params(slot)
-            }
-            Self::GetBlockArchival => {
-                let slot = ctx.tip_slot?.checked_sub(ARCHIVAL_SLOT_DEPTH)?;
-                block_params(slot)
-            }
+            Self::GetBlockRecent | Self::GetBlockArchival => block_params(self.probed_slot(ctx)?),
             Self::GetTransactionRecent => transaction_params(ctx.recent_signature.clone()?),
             Self::GetTransactionArchival => transaction_params(ctx.archival_signature.clone()?),
         };
@@ -149,6 +142,24 @@ impl RpcMethod {
             }
             Self::GetSignaturesForAddress => result.as_array().is_some_and(|a| !a.is_empty()),
         }
+    }
+
+    pub fn probed_slot(self, ctx: &RequestContext) -> Option<u64> {
+        match self {
+            Self::GetBlockRecent => Some(ctx.tip_slot?.saturating_sub(BLOCK_CONFIRMATION_DEPTH)),
+            Self::GetBlockArchival => ctx.tip_slot?.checked_sub(ARCHIVAL_SLOT_DEPTH),
+            _ => None,
+        }
+    }
+
+    pub fn claimed_blockhash(self, result: &Value) -> Option<String> {
+        match self {
+            Self::GetLatestBlockhash => value_of(result).get("blockhash")?.as_str(),
+            Self::GetBlockRecent => result.get("blockhash")?.as_str(),
+            _ => None,
+        }
+        .filter(|s| !s.is_empty())
+        .map(str::to_owned)
     }
 
     pub fn observed_slot(self, result: &Value) -> Option<u64> {

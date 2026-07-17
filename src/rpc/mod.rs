@@ -25,6 +25,20 @@ pub struct CallResult {
     pub signature: Option<String>,
     pub archival_signature: Option<String>,
     pub accounts: Vec<String>,
+    pub blockhash_claim: Option<BlockhashClaim>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BlockhashClaim {
+    pub slot: u64,
+    pub blockhash: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RawResponse {
+    Result(Value),
+    RpcError(i64),
+    Unavailable,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -115,18 +129,36 @@ impl RpcClient {
     }
 
     pub async fn raw_call(&self, url: &str, method: &str, params: Value) -> Option<Value> {
+        match self.raw_call_checked(url, method, params).await {
+            RawResponse::Result(value) => Some(value),
+            _ => None,
+        }
+    }
+
+    pub async fn raw_call_checked(&self, url: &str, method: &str, params: Value) -> RawResponse {
         let body = serde_json::json!({
             "jsonrpc": "2.0",
             "id": self.next_id.fetch_add(1, Ordering::Relaxed),
             "method": method,
             "params": params,
         });
-        let response = self.http.post(url).json(&body).send().await.ok()?;
+        let Ok(response) = self.http.post(url).json(&body).send().await else {
+            return RawResponse::Unavailable;
+        };
         if !response.status().is_success() {
-            return None;
+            return RawResponse::Unavailable;
         }
-        let json: Value = response.json().await.ok()?;
-        json.get("result").cloned()
+        let Ok(json) = response.json::<Value>().await else {
+            return RawResponse::Unavailable;
+        };
+        if let Some(error) = json.get("error") {
+            let code = error.get("code").and_then(Value::as_i64).unwrap_or(0);
+            return RawResponse::RpcError(code);
+        }
+        match json.get("result") {
+            Some(value) => RawResponse::Result(value.clone()),
+            None => RawResponse::Unavailable,
+        }
     }
 
     pub async fn call(
@@ -159,6 +191,7 @@ impl RpcClient {
                     signature: None,
                     archival_signature: None,
                     accounts: Vec::new(),
+                    blockhash_claim: None,
                 });
             }
         };
@@ -171,6 +204,14 @@ impl RpcClient {
             Ok(bytes) => classify(http_status, &bytes, method),
             Err(_) => Parsed::error(ErrorKind::Transport),
         };
+        let claim_slot = match method {
+            RpcMethod::GetBlockRecent => method.probed_slot(ctx),
+            _ => parsed.observed_slot,
+        };
+        let blockhash_claim = parsed
+            .claimed_blockhash
+            .zip(claim_slot)
+            .map(|(blockhash, slot)| BlockhashClaim { slot, blockhash });
         Some(CallResult {
             latency,
             status: parsed.status,
@@ -178,6 +219,7 @@ impl RpcClient {
             signature: parsed.signature,
             archival_signature: parsed.archival_signature,
             accounts: parsed.accounts,
+            blockhash_claim,
         })
     }
 }
@@ -188,6 +230,7 @@ struct Parsed {
     signature: Option<String>,
     archival_signature: Option<String>,
     accounts: Vec<String>,
+    claimed_blockhash: Option<String>,
 }
 
 impl Parsed {
@@ -198,6 +241,7 @@ impl Parsed {
             signature: None,
             archival_signature: None,
             accounts: Vec::new(),
+            claimed_blockhash: None,
         }
     }
 }
@@ -229,6 +273,7 @@ fn classify(status: StatusCode, body: &[u8], method: RpcMethod) -> Parsed {
                 signature: None,
                 archival_signature: None,
                 accounts: Vec::new(),
+                claimed_blockhash: None,
             };
         }
         return Parsed::error(ErrorKind::RpcError(code));
@@ -245,6 +290,7 @@ fn classify(status: StatusCode, body: &[u8], method: RpcMethod) -> Parsed {
         signature: method.recent_signature(result),
         archival_signature: method.archival_signature(result),
         accounts: method.recent_accounts(result),
+        claimed_blockhash: method.claimed_blockhash(result),
     }
 }
 

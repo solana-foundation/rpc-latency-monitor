@@ -38,6 +38,10 @@ pub struct ReferenceCheckConfig {
     pub interval: Duration,
     #[serde(default = "default_reference_depth")]
     pub depth: u64,
+    #[serde(default = "default_claim_delay_slots")]
+    pub claim_delay_slots: u64,
+    #[serde(default = "default_claim_margin")]
+    pub claim_margin: u64,
 }
 
 impl Default for ReferenceCheckConfig {
@@ -47,6 +51,8 @@ impl Default for ReferenceCheckConfig {
             exclude_provider: None,
             interval: default_reference_interval(),
             depth: default_reference_depth(),
+            claim_delay_slots: default_claim_delay_slots(),
+            claim_margin: default_claim_margin(),
         }
     }
 }
@@ -57,6 +63,14 @@ const fn default_reference_interval() -> Duration {
 
 const fn default_reference_depth() -> u64 {
     64
+}
+
+const fn default_claim_delay_slots() -> u64 {
+    32
+}
+
+const fn default_claim_margin() -> u64 {
+    16
 }
 
 #[derive(Debug, Clone, Deserialize)]
