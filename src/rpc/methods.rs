@@ -168,6 +168,11 @@ impl RpcMethod {
         }
     }
 
+    #[inline]
+    pub const fn probes_fixed_slot(self) -> bool {
+        matches!(self, Self::GetBlockRecent | Self::GetBlockArchival)
+    }
+
     pub fn recent_signature(self, result: &Value) -> Option<String> {
         if !matches!(self, Self::GetSignaturesForAddress) {
             return None;

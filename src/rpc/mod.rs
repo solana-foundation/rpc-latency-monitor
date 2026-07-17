@@ -30,6 +30,7 @@ pub struct CallResult {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CallStatus {
     Success,
+    Skipped,
     Error(ErrorKind),
 }
 
@@ -54,14 +55,20 @@ impl CallStatus {
     pub const fn label(self) -> &'static str {
         match self {
             Self::Success => "success",
+            Self::Skipped => "skipped",
             Self::Error(_) => "error",
         }
     }
 
     #[inline]
+    pub const fn is_error(self) -> bool {
+        matches!(self, Self::Error(_))
+    }
+
+    #[inline]
     pub const fn error_kind(self) -> Option<&'static str> {
         match self {
-            Self::Success => None,
+            Self::Success | Self::Skipped => None,
             Self::Error(kind) => Some(kind.as_str()),
         }
     }
@@ -195,6 +202,9 @@ impl Parsed {
     }
 }
 
+const SLOT_SKIPPED: i64 = -32007;
+const SLOT_SKIPPED_LONG_TERM: i64 = -32009;
+
 fn send_error_kind(error: &reqwest::Error) -> ErrorKind {
     if error.is_timeout() {
         ErrorKind::Timeout
@@ -212,6 +222,15 @@ fn classify(status: StatusCode, body: &[u8], method: RpcMethod) -> Parsed {
     };
     if let Some(error) = json.get("error") {
         let code = error.get("code").and_then(Value::as_i64).unwrap_or(0);
+        if matches!(code, SLOT_SKIPPED | SLOT_SKIPPED_LONG_TERM) && method.probes_fixed_slot() {
+            return Parsed {
+                status: CallStatus::Skipped,
+                observed_slot: None,
+                signature: None,
+                archival_signature: None,
+                accounts: Vec::new(),
+            };
+        }
         return Parsed::error(ErrorKind::RpcError(code));
     }
     let Some(result) = json.get("result") else {
@@ -280,6 +299,39 @@ mod tests {
             RpcMethod::GetSignaturesForAddress,
         );
         assert_eq!(parsed.signature, Some("abc".to_string()));
+    }
+
+    #[test]
+    fn skipped_slot_rpc_errors_are_not_provider_errors() {
+        for code in [-32007i64, -32009] {
+            let parsed = classify(
+                StatusCode::OK,
+                &body(&format!(
+                    r#"{{"jsonrpc":"2.0","error":{{"code":{code},"message":"Slot 1 was skipped"}},"id":1}}"#
+                )),
+                RpcMethod::GetBlockRecent,
+            );
+            assert_eq!(parsed.status, CallStatus::Skipped);
+        }
+        assert_eq!(CallStatus::Skipped.label(), "skipped");
+        assert_eq!(CallStatus::Skipped.error_kind(), None);
+        assert!(!CallStatus::Skipped.is_success());
+        assert!(!CallStatus::Skipped.is_error());
+    }
+
+    #[test]
+    fn skipped_slot_codes_stay_errors_on_non_fixed_slot_methods() {
+        let parsed = classify(
+            StatusCode::OK,
+            &body(
+                r#"{"jsonrpc":"2.0","error":{"code":-32007,"message":"Slot 1 was skipped"},"id":1}"#,
+            ),
+            RpcMethod::GetTransactionRecent,
+        );
+        assert_eq!(
+            parsed.status,
+            CallStatus::Error(ErrorKind::RpcError(-32007))
+        );
     }
 
     #[test]
