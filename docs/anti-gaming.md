@@ -12,6 +12,33 @@ supplies only (a) an unpoisonable view of the chain tip and (b) ground truth for
 after-the-fact content checks. Both are location-invariant, which is why one node
 serves every vantage point.
 
+### Why a dedicated reference node, and not the providers themselves?
+
+The obvious cheaper alternative is to cross-check providers against each other —
+take the majority answer as truth, flag the outlier — and run no node at all. We
+don't, for two reasons that a majority vote cannot fix:
+
+- **Circularity / poisoning.** If truth is derived from the set being graded, a
+  colluding or simply majority-wrong set *becomes* the definition of truth and the
+  one honest provider is flagged as the liar. With a handful of measured providers,
+  "majority" is a thin margin; a single well-placed lie can move it. The reference
+  node is an anchor *outside* the measured set precisely so no provider's answer can
+  define the baseline it is judged against. (This is the same reasoning that moved
+  the chain tip off `max_observed` in Layer 1.)
+- **Timing skew on fresh data.** Providers are polled at slightly different instants
+  and legitimately sit at different slots — that difference *is* the latency we
+  measure. So at any wall-clock moment there is no single "correct" recent blockhash
+  to vote on; consensus on fast-moving data manufactures disagreement between honest
+  providers. The reference node sidesteps this by verifying a *settled* claim (well
+  after the fact) against absolute truth, which a vote has no clean equivalent for.
+
+The **one exception is archival data**, which is immutable and old: every honest
+provider must return the byte-identical blockhash for a given ancient slot, with no
+timing skew and no poisoning subtlety. There, an independent source suffices — but
+our reference node runs a limited ledger and has purged that history, so archival
+claims are checked against a separate trusted archival RPC (`archival_rpc_url`)
+rather than the node. See the archival row below.
+
 ## Layer 0 — response validation (always on)
 
 A `200 OK` is not a success. Every response must carry the shape and content the
@@ -47,18 +74,26 @@ predictable and therefore forgeable; the content below is not.
 
 Every successful probe response yields a *claim* — no extra provider traffic is
 generated. Claims settle for `claim_delay_slots` (default 32) to outlive
-processed-commitment forks, then are verified against the reference node and
-counted in `rpc_claim_check_total{provider, method, target, result}` (`target` is
-the gPA probe target name, empty for other methods).
+processed-commitment forks, then are verified against the reference node (archival
+methods against `archival_rpc_url`) and counted in
+`rpc_claim_check_total{provider, method, target, result}` (`target` is the gPA
+probe target name, empty for other methods).
 
-| Method | Claim | Verified against the node | Unforgeable because |
+| Method | Claim | Verified against | Unforgeable because |
 |---|---|---|---|
-| `getLatestBlockhash` | (slot S, blockhash B) | B must be the blockhash of some block in `[S−8, S]` | a blockhash is a hash over block contents, unknowable before the block exists |
-| `getBlock` (recent) | (slot S, blockhash B) | B must equal the node's blockhash at exactly S | same |
-| `getProgramAccounts`, `getTokenAccountsByOwner` | context slot, account count, 3 sampled (pubkey, data), the probed target | samples must exist on the node and satisfy the target's own filters (program owner, dataSize, memcmp); count must be within `claim_count_tolerance` (default 8) of the node's own count for that target | real pubkeys cannot be invented; the set size is checkable |
-| `getTransaction` (recent), `getSignaturesForAddress` | (signature, slot) | the node must know that signature at that slot | transaction signatures cannot be invented |
-| `getAccountInfo` (clock sysvar) | slot, unix_timestamp | timestamp must be within 2 minutes of wall time | replayed old clock data carries an old timestamp |
-| any slot-bearing method | observed slot | must not exceed the node's time-projected tip by more than `claim_margin` (default 16 slots) | a claim about the future is physically impossible |
+| `getLatestBlockhash` | (slot S, blockhash B) | node: B must be the blockhash of some block in `[S−8, S]` | a blockhash is a hash over block contents, unknowable before the block exists |
+| `getBlock` (recent) | (slot S, blockhash B) | node: B must equal the node's blockhash at exactly S | same |
+| `getProgramAccounts`, `getTokenAccountsByOwner` | context slot, account count, 3 sampled (pubkey, data), the probed target | node: samples must exist and satisfy the target's own filters (program owner, dataSize, memcmp); count within `claim_count_tolerance` (default 8) of the node's own count for that target | real pubkeys cannot be invented; the set size is checkable |
+| `getTransaction` (recent), `getSignaturesForAddress` | (signature, slot) | node: the node must know that signature at that slot | transaction signatures cannot be invented |
+| `getBlock` (archival), `getTransaction` (archival) | (slot S, blockhash B) / (signature, slot) | **archival RPC**: B must equal the archival endpoint's blockhash at exactly S / the signature must be known there at that slot | archival data is immutable, so a moving target the provider can't predict has one correct answer that a fixed lookup table can't fake |
+| `getAccountInfo` (clock sysvar) | slot, unix_timestamp | node: timestamp must be within 2 minutes of wall time | replayed old clock data carries an old timestamp |
+| any slot-bearing method | observed slot | node: must not exceed the node's time-projected tip by more than `claim_margin` (default 16 slots) | a claim about the future is physically impossible |
+
+The archival slot is a moving target (a fixed offset below the live tip), so a
+provider cannot pre-seed a canned `slot → blockhash` answer and skip the actual
+deep read: it can't predict which ancient slot the next round will ask for. That is
+why archival verification needs a real source of truth rather than a hardcoded
+known-good value — a fixed anchor would be trivially precomputable.
 
 ### Verdicts
 
@@ -74,7 +109,9 @@ the gPA probe target name, empty for other methods).
 - `missing` — the claimed content should exist but no block/transaction was found.
 - `implausible` — the claim was ahead of physics (future slot, wrong wall clock).
 - `skipped` — *we* couldn't verify (reference node unreachable, block unavailable,
-  node stale). Never counted against a provider.
+  node stale, or — for archival methods — no `archival_rpc_url` configured or the
+  archival endpoint didn't answer). Never counted against a provider. Archival
+  verdicts are *not* gated on our node's staleness, since they don't consult it.
 
 ## What if the data is delayed, not dishonest?
 

@@ -273,9 +273,12 @@ async fn run_verify_tick(
     let node_stale = sink.node_stale();
     let mut blocks: HashMap<u64, NodeBlock> = HashMap::new();
     for claim in due {
+        // Archival claims are verified against the archival RPC, not our node,
+        // so node staleness (which is about our node trailing the live tip) is
+        // irrelevant to them.
         let result = if claim.implausible {
             "implausible"
-        } else if node_stale {
+        } else if node_stale && !is_archival(claim.method) {
             "skipped"
         } else {
             judge_claim(client, config, &claim, &mut blocks, gpa_counts).await
@@ -286,6 +289,14 @@ async fn run_verify_tick(
         };
         metrics.record_claim_check(&claim.provider, claim.method, target, result);
     }
+}
+
+#[inline]
+fn is_archival(method: RpcMethod) -> bool {
+    matches!(
+        method,
+        RpcMethod::GetBlockArchival | RpcMethod::GetTransactionArchival
+    )
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -302,10 +313,25 @@ async fn judge_claim(
     blocks: &mut HashMap<u64, NodeBlock>,
     gpa_counts: &mut HashMap<String, (u64, Instant)>,
 ) -> &'static str {
-    let url = &config.rpc_url;
+    // Archival claims (getBlock_archival / getTransaction_archival) reach ~40M
+    // slots back — our --limit-ledger-size reference node purged that history,
+    // so they're verified against a trusted archival RPC instead. Fail open
+    // (skipped) when none is configured.
+    let url = if is_archival(claim.method) {
+        if config.archival_rpc_url.is_empty() {
+            return "skipped";
+        }
+        &config.archival_rpc_url
+    } else {
+        &config.rpc_url
+    };
     match &claim.payload {
         Some(ClaimPayload::Blockhash { blockhash, .. }) => match claim.method {
-            RpcMethod::GetBlockRecent => {
+            // Both recent and archival blocks probe an exact slot, so the
+            // node's blockhash at that exact slot must match. (Only
+            // getLatestBlockhash needs the window, since its slot is the
+            // envelope's, which can lead the block that carried the hash.)
+            RpcMethod::GetBlockRecent | RpcMethod::GetBlockArchival => {
                 judge_exact_block(client, url, claim.slot, blockhash, blocks).await
             }
             _ => judge_window_block(client, url, claim.slot, blockhash, blocks).await,
@@ -686,6 +712,37 @@ mod tests {
             );
         }
         assert_eq!(sink.queue.lock().unwrap().len(), CLAIM_BUFFER_CAP);
+    }
+
+    #[test]
+    fn only_archival_methods_are_archival() {
+        assert!(is_archival(RpcMethod::GetBlockArchival));
+        assert!(is_archival(RpcMethod::GetTransactionArchival));
+        assert!(!is_archival(RpcMethod::GetBlockRecent));
+        assert!(!is_archival(RpcMethod::GetTransactionRecent));
+        assert!(!is_archival(RpcMethod::GetLatestBlockhash));
+    }
+
+    #[tokio::test]
+    async fn archival_claim_skips_when_no_archival_rpc_configured() {
+        // Default config has an empty archival_rpc_url; an archival claim must
+        // fail open (skipped), never mismatch, and must NOT be verified against
+        // the node (which lacks the history).
+        let config = ReferenceCheckConfig::default();
+        let client = RpcClient::new(Duration::from_millis(1)).unwrap();
+        let claim = Claim {
+            provider: "helius".into(),
+            method: RpcMethod::GetBlockArchival,
+            slot: 500,
+            payload: Some(blockhash(500, "oldhash")),
+            implausible: false,
+        };
+        let mut blocks = HashMap::new();
+        let mut gpa = None;
+        assert_eq!(
+            judge_claim(&client, &config, &claim, &mut blocks, &mut gpa).await,
+            "skipped"
+        );
     }
 
     async fn judge_block_with(

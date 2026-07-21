@@ -280,8 +280,11 @@ The measurements are designed to be neutral and reproducible:
   the tip for others.
 - **Content verification.** Provider responses are verified after the fact against the reference
   node — blockhashes, account existence and counts, transaction slots, clock timestamps — so data
-  stamped with a fresh slot must actually be fresh. See
-  [`docs/anti-gaming.md`](./docs/anti-gaming.md) for the full design, including how delayed-but-honest
+  stamped with a fresh slot must actually be fresh. Archival responses (`getBlock`/`getTransaction`
+  ~40M slots back) are checked against a trusted archival RPC (`archival_rpc_url`) instead, since the
+  reference node runs a limited ledger; the target slot moves each round so a canned answer can't fake
+  the deep read. See [`docs/anti-gaming.md`](./docs/anti-gaming.md) for the full design — including why
+  a dedicated reference node is used rather than cross-provider consensus, and how delayed-but-honest
   data is kept distinct from fabrication.
 - **gPA index (note).** The `get_program_accounts` check is a deliberately heavy query. It rotates
   through a curated, config-driven list of real query shapes (`gpa_targets`) rather than a single
