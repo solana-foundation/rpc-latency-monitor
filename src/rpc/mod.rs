@@ -7,6 +7,7 @@ use reqwest::header::{HeaderMap, HeaderValue, CACHE_CONTROL, PRAGMA};
 use reqwest::StatusCode;
 use serde_json::Value;
 
+use crate::config::GpaTarget;
 use crate::rpc::methods::RpcMethod;
 
 #[derive(Debug, Clone, Default)]
@@ -15,6 +16,7 @@ pub struct RequestContext {
     pub recent_signature: Option<String>,
     pub archival_signature: Option<String>,
     pub recent_accounts: Vec<String>,
+    pub gpa_target: Option<GpaTarget>,
 }
 
 #[derive(Debug, Clone)]
@@ -38,6 +40,7 @@ pub enum ClaimPayload {
         slot: Option<u64>,
         count: u64,
         sample: Vec<AccountSample>,
+        target: GpaTarget,
     },
     Transaction {
         slot: u64,
@@ -320,7 +323,7 @@ fn classify(status: StatusCode, body: &[u8], method: RpcMethod, ctx: &RequestCon
     let Some(result) = json.get("result") else {
         return Parsed::error(ErrorKind::Decode);
     };
-    if !method.is_valid_result(result) {
+    if !method.is_valid_result(result, ctx) {
         return Parsed::error(ErrorKind::Empty);
     }
     Parsed {

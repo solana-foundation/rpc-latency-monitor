@@ -10,7 +10,7 @@ use figment::{
 };
 use serde::Deserialize;
 
-use crate::rpc::methods::RpcMethod;
+use crate::rpc::methods::{self, RpcMethod};
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct Config {
@@ -20,6 +20,8 @@ pub struct Config {
     pub reference_slot: ReferenceSlotConfig,
     pub providers: Vec<ProviderConfig>,
     pub checks: Vec<CheckConfig>,
+    #[serde(default = "default_gpa_targets")]
+    pub gpa_targets: Vec<GpaTarget>,
     #[serde(with = "humantime_serde", default = "default_request_timeout")]
     pub request_timeout: Duration,
     #[serde(default = "default_max_slot_lag")]
@@ -116,6 +118,26 @@ pub struct ProviderConfig {
     pub url: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct GpaTarget {
+    pub name: String,
+    pub program: String,
+    #[serde(default)]
+    pub data_size: Option<u64>,
+    #[serde(default)]
+    pub memcmp: Vec<MemcmpFilter>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct MemcmpFilter {
+    pub offset: u64,
+    pub bytes: String,
+}
+
+fn default_gpa_targets() -> Vec<GpaTarget> {
+    vec![methods::builtin_token_owner_target()]
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct CheckConfig {
     pub method: RpcMethod,
@@ -155,6 +177,49 @@ impl Config {
             && self.reference_slot.endpoint.is_none()
         {
             bail!("config: reference_slot.source is 'endpoint' but no endpoint is set");
+        }
+        if self
+            .checks
+            .iter()
+            .any(|c| c.method == RpcMethod::GetProgramAccounts)
+            && self.gpa_targets.is_empty()
+        {
+            bail!("config: get_program_accounts check requires at least one gpa_target");
+        }
+        let mut names = HashSet::with_capacity(self.gpa_targets.len());
+        for target in &self.gpa_targets {
+            if !names.insert(target.name.as_str()) {
+                bail!("config: duplicate gpa_target name '{}'", target.name);
+            }
+            if target.data_size.is_none() && target.memcmp.is_empty() {
+                bail!(
+                    "config: gpa_target '{}' needs data_size or memcmp",
+                    target.name
+                );
+            }
+            if bs58::decode(&target.program)
+                .into_vec()
+                .map(|b| b.len())
+                .unwrap_or(0)
+                != 32
+            {
+                bail!(
+                    "config: gpa_target '{}' program is not a valid pubkey",
+                    target.name
+                );
+            }
+            for filter in &target.memcmp {
+                if bs58::decode(&filter.bytes)
+                    .into_vec()
+                    .map(|b| b.is_empty())
+                    .unwrap_or(true)
+                {
+                    bail!(
+                        "config: gpa_target '{}' memcmp bytes are not valid base58",
+                        target.name
+                    );
+                }
+            }
         }
         Ok(())
     }
@@ -228,6 +293,68 @@ mod tests {
             .validate()
             .expect_err("duplicate names must be rejected");
         assert!(err.to_string().contains("duplicate provider name"));
+    }
+
+    #[test]
+    fn gpa_targets_default_to_the_builtin_owner_probe() {
+        let config = parse(
+            "region: x\n\
+             server: { bind: \"0.0.0.0:9464\" }\n\
+             providers: [{ name: a, url: \"http://a\" }]\n\
+             checks: [{ method: get_program_accounts, interval: 2s }]\n",
+        );
+        assert!(config.validate().is_ok());
+        assert_eq!(
+            config.gpa_targets,
+            vec![methods::builtin_token_owner_target()]
+        );
+    }
+
+    #[test]
+    fn gpa_targets_are_validated() {
+        let base = "region: x\n\
+             server: { bind: \"0.0.0.0:9464\" }\n\
+             providers: [{ name: a, url: \"http://a\" }]\n\
+             checks: [{ method: get_program_accounts, interval: 2s }]\n";
+
+        let empty = parse(&format!("{base}gpa_targets: []\n"));
+        assert!(empty.validate().is_err());
+
+        let dup = parse(&format!(
+            "{base}gpa_targets:\n\
+             \x20 - {{ name: t, program: TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA, data_size: 165 }}\n\
+             \x20 - {{ name: t, program: TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA, data_size: 200 }}\n"
+        ));
+        assert!(dup
+            .validate()
+            .unwrap_err()
+            .to_string()
+            .contains("duplicate"));
+
+        let no_filters = parse(&format!(
+            "{base}gpa_targets:\n\
+             \x20 - {{ name: t, program: TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA }}\n"
+        ));
+        assert!(no_filters.validate().is_err());
+
+        let bad_program = parse(&format!(
+            "{base}gpa_targets:\n\
+             \x20 - {{ name: t, program: \"not-a-pubkey!\", data_size: 165 }}\n"
+        ));
+        assert!(bad_program.validate().is_err());
+
+        let bad_bytes = parse(&format!(
+            "{base}gpa_targets:\n\
+             \x20 - {{ name: t, program: TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA, memcmp: [{{ offset: 0, bytes: \"0OIl\" }}] }}\n"
+        ));
+        assert!(bad_bytes.validate().is_err());
+
+        let good = parse(&format!(
+            "{base}gpa_targets:\n\
+             \x20 - {{ name: pools, program: TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA, data_size: 752 }}\n\
+             \x20 - {{ name: owner, program: TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA, memcmp: [{{ offset: 32, bytes: 9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM }}] }}\n"
+        ));
+        assert!(good.validate().is_ok());
     }
 
     #[test]

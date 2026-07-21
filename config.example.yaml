@@ -64,6 +64,38 @@ reference_slot:
 #   claim_count_tolerance: 8   # allowed drift vs the node's own gPA count
 #   node_stale_slots: 64       # node lag beyond which verdicts are skipped
 
+# getProgramAccounts probe targets. The gPA check rotates through this list
+# round-robin (one target per probe) and labels its metrics with
+# target=<name>; non-gPA metrics carry target="". Each entry should be a real
+# heavy query shape seen in production traffic. The list is config-driven and
+# static on purpose: cross-provider comparability and claim verification both
+# need known filters. Filters mirror the RPC's dataSize / memcmp (offset +
+# base58 bytes); every returned account is validated against them, and claim
+# verification re-runs the same filters against the reference node.
+# Omit this key to use the built-in token_owner target only.
+gpa_targets:
+  # Token accounts of one owner (the long-standing default probe).
+  - name: token_owner
+    program: TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA
+    data_size: 165
+    memcmp: [{ offset: 32, bytes: 9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM }]
+  # Stake accounts by withdraw authority (StakeStateV2: staker at offset 12,
+  # withdrawer at offset 44).
+  # - name: stake_withdraw
+  #   program: Stake11111111111111111111111111111111111111
+  #   data_size: 200
+  #   memcmp: [{ offset: 44, bytes: <withdraw-authority> }]
+  # DEX pool enumeration by dataSize (Raydium-style pool discovery).
+  # - name: dex_pools
+  #   program: 675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8
+  #   data_size: 752
+  # Holders of a mid-cap mint. Keep the result set in the low thousands —
+  # response size is ~220 bytes per account.
+  # - name: mint_holders
+  #   program: TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA
+  #   data_size: 165
+  #   memcmp: [{ offset: 0, bytes: <mint> }]
+
 # RPC providers to benchmark. `url` may contain a ${ENV_VAR} placeholder; the
 # whole api-key/url secret is supplied via the environment.
 providers:

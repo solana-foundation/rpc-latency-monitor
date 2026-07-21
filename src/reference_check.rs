@@ -5,7 +5,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use serde_json::json;
 use tokio::time::sleep;
 
-use crate::config::ReferenceCheckConfig;
+use crate::config::{GpaTarget, ReferenceCheckConfig};
 use crate::metrics::Metrics;
 use crate::providers::ProviderEndpoint;
 use crate::reference_slot::ReferenceSlot;
@@ -241,10 +241,10 @@ pub fn spawn_claim_checker(
     let sink = ClaimSink::new(config.claim_margin, config.node_stale_slots, fleet);
     let verifier = sink.clone();
     tokio::spawn(async move {
-        let mut gpa_count: Option<(u64, Instant)> = None;
+        let mut gpa_counts: HashMap<String, (u64, Instant)> = HashMap::new();
         loop {
             sleep(VERIFY_TICK).await;
-            run_verify_tick(&client, &metrics, &config, &verifier, &mut gpa_count).await;
+            run_verify_tick(&client, &metrics, &config, &verifier, &mut gpa_counts).await;
         }
     });
     Some(sink)
@@ -255,7 +255,7 @@ async fn run_verify_tick(
     metrics: &Metrics,
     config: &ReferenceCheckConfig,
     sink: &ClaimSink,
-    gpa_count: &mut Option<(u64, Instant)>,
+    gpa_counts: &mut HashMap<String, (u64, Instant)>,
 ) {
     if let Some(slot) = node_slot(client, &config.rpc_url).await {
         sink.set_node_tip(slot);
@@ -278,9 +278,13 @@ async fn run_verify_tick(
         } else if node_stale {
             "skipped"
         } else {
-            judge_claim(client, config, &claim, &mut blocks, gpa_count).await
+            judge_claim(client, config, &claim, &mut blocks, gpa_counts).await
         };
-        metrics.record_claim_check(&claim.provider, claim.method, result);
+        let target = match &claim.payload {
+            Some(ClaimPayload::Accounts { target, .. }) => target.name.as_str(),
+            _ => "",
+        };
+        metrics.record_claim_check(&claim.provider, claim.method, target, result);
     }
 }
 
@@ -296,7 +300,7 @@ async fn judge_claim(
     config: &ReferenceCheckConfig,
     claim: &Claim,
     blocks: &mut HashMap<u64, NodeBlock>,
-    gpa_count: &mut Option<(u64, Instant)>,
+    gpa_counts: &mut HashMap<String, (u64, Instant)>,
 ) -> &'static str {
     let url = &config.rpc_url;
     match &claim.payload {
@@ -306,13 +310,19 @@ async fn judge_claim(
             }
             _ => judge_window_block(client, url, claim.slot, blockhash, blocks).await,
         },
-        Some(ClaimPayload::Accounts { count, sample, .. }) => {
-            let node_count = cached_gpa_count(client, url, gpa_count).await;
+        Some(ClaimPayload::Accounts {
+            count,
+            sample,
+            target,
+            ..
+        }) => {
+            let node_count = cached_gpa_count(client, url, target, gpa_counts).await;
             judge_accounts(
                 client,
                 url,
                 *count,
                 sample,
+                target,
                 node_count,
                 config.claim_count_tolerance,
             )
@@ -370,11 +380,13 @@ async fn judge_window_block(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn judge_accounts(
     client: &RpcClient,
     url: &str,
     count: u64,
     sample: &[AccountSample],
+    target: &GpaTarget,
     node_count: Option<u64>,
     tolerance: u64,
 ) -> &'static str {
@@ -400,10 +412,10 @@ async fn judge_accounts(
     if entries.len() != sample.len() {
         return "skipped";
     }
-    let owner = methods::probe_owner_bytes();
+    let matcher = methods::GpaMatcher::new(target);
     let mut drift = false;
     for (claimed, entry) in sample.iter().zip(entries) {
-        if entry.is_null() || !methods::gpa_account_matches(entry, &owner) {
+        if entry.is_null() || !matcher.matches(entry) {
             return "mismatch";
         }
         let node_data = entry
@@ -448,18 +460,19 @@ async fn judge_transaction(
 async fn cached_gpa_count(
     client: &RpcClient,
     url: &str,
-    cache: &mut Option<(u64, Instant)>,
+    target: &GpaTarget,
+    cache: &mut HashMap<String, (u64, Instant)>,
 ) -> Option<u64> {
-    if let Some((count, fetched)) = cache {
+    if let Some((count, fetched)) = cache.get(&target.name) {
         if fetched.elapsed() < GPA_COUNT_TTL {
             return Some(*count);
         }
     }
     let result = client
-        .raw_call(url, "getProgramAccounts", methods::gpa_count_params())
+        .raw_call(url, "getProgramAccounts", methods::gpa_count_params(target))
         .await?;
     let count = result.as_array()?.len() as u64;
-    *cache = Some((count, Instant::now()));
+    cache.insert(target.name.clone(), (count, Instant::now()));
     Some(count)
 }
 
@@ -745,16 +758,35 @@ mod tests {
     #[tokio::test]
     async fn account_count_outside_tolerance_is_a_mismatch() {
         let client = RpcClient::new(Duration::from_millis(1)).unwrap();
+        let target = methods::builtin_token_owner_target();
         let sample = vec![AccountSample {
             pubkey: "k1".into(),
             data: "d1".into(),
         }];
         assert_eq!(
-            judge_accounts(&client, "http://127.0.0.1:1", 100, &sample, Some(50), 8).await,
+            judge_accounts(
+                &client,
+                "http://127.0.0.1:1",
+                100,
+                &sample,
+                &target,
+                Some(50),
+                8
+            )
+            .await,
             "mismatch"
         );
         assert_eq!(
-            judge_accounts(&client, "http://127.0.0.1:1", 100, &sample, Some(104), 8).await,
+            judge_accounts(
+                &client,
+                "http://127.0.0.1:1",
+                100,
+                &sample,
+                &target,
+                Some(104),
+                8
+            )
+            .await,
             "skipped"
         );
     }

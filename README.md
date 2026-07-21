@@ -153,7 +153,7 @@ to either the config value or the raw JSON-RPC name:
 | `get_latest_blockhash` | `getLatestBlockhash` | `getLatestBlockhash` | `processed`; validated to return a blockhash. |
 | `get_account_info` | `getAccountInfo` | `getAccountInfo` | A real account rotated from recently observed blocks (falls back to a known account); validated well-formed (a live target may since have closed). |
 | `get_multiple_accounts` | `getMultipleAccounts` | `getMultipleAccounts` | A batch of accounts from recent blocks — a core trading fast-path read. |
-| `get_program_accounts` | `getProgramAccounts` | `getProgramAccounts` | Token GPA filtered to one owner, **returning real account data** (no zero-length `dataSlice`). |
+| `get_program_accounts` | `getProgramAccounts` | `getProgramAccounts` | Rotates round-robin through the configured `gpa_targets` (real heavy query shapes: owner scans, stake-by-authority, pool enumeration by `dataSize`, holders-by-mint), **returning real account data** (no zero-length `dataSlice`). Metrics carry a `target` label with the target's name. |
 | `get_token_accounts_by_owner` | `getTokenAccountsByOwner` | `getTokenAccountsByOwner` | All token accounts for an owner with a large, stable set. |
 | `get_block_recent` | `getBlock` | `getBlock_recent` | A recent block a fixed depth behind the tip, **`transactionDetails: full`** (a real block fetch); also seeds the live account pool. |
 | `get_block_archival` | `getBlock` | `getBlock_archival` | A full block ~40M slots back, retained only by archival nodes (non-archival tiers correctly error). Longer per-check `timeout` (30s) for cold-storage retrieval. |
@@ -283,10 +283,13 @@ The measurements are designed to be neutral and reproducible:
   stamped with a fresh slot must actually be fresh. See
   [`docs/anti-gaming.md`](./docs/anti-gaming.md) for the full design, including how delayed-but-honest
   data is kept distinct from fabrication.
-- **gPA index (note).** The `get_program_accounts` check is a deliberately heavy query (filtered
-  token-account scan). It is the most demanding read in the suite and is tracked as its own signal of
-  how providers handle expensive index-style requests; it is weighted separately from the
-  lightweight checks rather than averaged into them.
+- **gPA index (note).** The `get_program_accounts` check is a deliberately heavy query. It rotates
+  through a curated, config-driven list of real query shapes (`gpa_targets`) rather than a single
+  hard-coded filter, so providers can't special-case one query — while staying static enough that
+  results are comparable across providers and verifiable against the reference node. It is the most
+  demanding read in the suite and is tracked as its own signal (per `target`) of how providers handle
+  expensive index-style requests; it is weighted separately from the lightweight checks rather than
+  averaged into them.
 
 Outcomes are classified precisely — see [`docs/error-kinds.md`](./docs/error-kinds.md) for the full
 label taxonomy — so a slow-but-correct provider is never conflated with a fast-but-failing (or
