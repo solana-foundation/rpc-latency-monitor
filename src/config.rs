@@ -215,7 +215,7 @@ impl Config {
                     .unwrap_or(true)
                 {
                     bail!(
-                        "config: gpa_target '{}' memcmp bytes are not valid base58",
+                        "config: gpa_target '{}' memcmp bytes must be valid, non-empty base58",
                         target.name
                     );
                 }

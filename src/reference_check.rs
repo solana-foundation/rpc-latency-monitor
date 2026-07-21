@@ -463,16 +463,16 @@ async fn cached_gpa_count(
     target: &GpaTarget,
     cache: &mut HashMap<String, (u64, Instant)>,
 ) -> Option<u64> {
-    if let Some((count, fetched)) = cache.get(&target.name) {
+    let params = methods::gpa_count_params(target);
+    let key = params.to_string();
+    if let Some((count, fetched)) = cache.get(&key) {
         if fetched.elapsed() < GPA_COUNT_TTL {
             return Some(*count);
         }
     }
-    let result = client
-        .raw_call(url, "getProgramAccounts", methods::gpa_count_params(target))
-        .await?;
+    let result = client.raw_call(url, "getProgramAccounts", params).await?;
     let count = result.as_array()?.len() as u64;
-    cache.insert(target.name.clone(), (count, Instant::now()));
+    cache.insert(key, (count, Instant::now()));
     Some(count)
 }
 
