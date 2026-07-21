@@ -273,9 +273,6 @@ async fn run_verify_tick(
     let node_stale = sink.node_stale();
     let mut blocks: HashMap<u64, NodeBlock> = HashMap::new();
     for claim in due {
-        // Archival claims are verified against the archival RPC, not our node,
-        // so node staleness (which is about our node trailing the live tip) is
-        // irrelevant to them.
         let result = if claim.implausible {
             "implausible"
         } else if node_stale && !is_archival(claim.method) {
@@ -313,10 +310,6 @@ async fn judge_claim(
     blocks: &mut HashMap<u64, NodeBlock>,
     gpa_counts: &mut HashMap<String, (u64, Instant)>,
 ) -> &'static str {
-    // Archival claims (getBlock_archival / getTransaction_archival) reach ~40M
-    // slots back — our --limit-ledger-size reference node purged that history,
-    // so they're verified against a trusted archival RPC instead. Fail open
-    // (skipped) when none is configured.
     let url = if is_archival(claim.method) {
         if config.archival_rpc_url.is_empty() {
             return "skipped";
@@ -327,10 +320,6 @@ async fn judge_claim(
     };
     match &claim.payload {
         Some(ClaimPayload::Blockhash { blockhash, .. }) => match claim.method {
-            // Both recent and archival blocks probe an exact slot, so the
-            // node's blockhash at that exact slot must match. (Only
-            // getLatestBlockhash needs the window, since its slot is the
-            // envelope's, which can lead the block that carried the hash.)
             RpcMethod::GetBlockRecent | RpcMethod::GetBlockArchival => {
                 judge_exact_block(client, url, claim.slot, blockhash, blocks).await
             }
@@ -725,9 +714,6 @@ mod tests {
 
     #[tokio::test]
     async fn archival_claim_skips_when_no_archival_rpc_configured() {
-        // Default config has an empty archival_rpc_url; an archival claim must
-        // fail open (skipped), never mismatch, and must NOT be verified against
-        // the node (which lacks the history).
         let config = ReferenceCheckConfig::default();
         let client = RpcClient::new(Duration::from_millis(1)).unwrap();
         let claim = Claim {
@@ -738,7 +724,7 @@ mod tests {
             implausible: false,
         };
         let mut blocks = HashMap::new();
-        let mut gpa = None;
+        let mut gpa = HashMap::new();
         assert_eq!(
             judge_claim(&client, &config, &claim, &mut blocks, &mut gpa).await,
             "skipped"
@@ -757,11 +743,28 @@ mod tests {
         }
         let client = RpcClient::new(Duration::from_millis(1)).unwrap();
         match method {
-            RpcMethod::GetBlockRecent => {
+            RpcMethod::GetBlockRecent | RpcMethod::GetBlockArchival => {
                 judge_exact_block(&client, "http://127.0.0.1:1", slot, hash, &mut cache).await
             }
             _ => judge_window_block(&client, "http://127.0.0.1:1", slot, hash, &mut cache).await,
         }
+    }
+
+    #[tokio::test]
+    async fn archival_block_claim_verified_by_exact_slot() {
+        let m = RpcMethod::GetBlockArchival;
+        assert_eq!(
+            judge_block_with(&[(500, NodeBlock::Hash("OLD".into()))], m, 500, "OLD").await,
+            "match"
+        );
+        assert_eq!(
+            judge_block_with(&[(500, NodeBlock::Hash("XXX".into()))], m, 500, "OLD").await,
+            "mismatch"
+        );
+        assert_eq!(
+            judge_block_with(&[(500, NodeBlock::Unavailable)], m, 500, "OLD").await,
+            "skipped"
+        );
     }
 
     #[tokio::test]

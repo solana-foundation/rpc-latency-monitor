@@ -832,7 +832,6 @@ mod tests {
 
     #[test]
     fn archival_methods_yield_verifiable_claims() {
-        // getBlock_archival: (probed slot, blockhash), same shape as recent.
         let ctx = ctx_with_tip(ARCHIVAL_SLOT_DEPTH + 500);
         let block = json!({ "blockhash": "oldhash", "transactions": [{}] });
         assert_eq!(
@@ -842,7 +841,6 @@ mod tests {
                 blockhash: "oldhash".into()
             })
         );
-        // getTransaction_archival: (slot, harvested archival signature).
         let ctx = RequestContext {
             archival_signature: Some("oldsig".into()),
             ..RequestContext::default()
