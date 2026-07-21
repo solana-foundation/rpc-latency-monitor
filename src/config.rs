@@ -26,6 +26,8 @@ pub struct Config {
     pub max_slot_lag: u64,
     #[serde(default)]
     pub reference_check: ReferenceCheckConfig,
+    #[serde(default)]
+    pub claim_checks: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -38,6 +40,14 @@ pub struct ReferenceCheckConfig {
     pub interval: Duration,
     #[serde(default = "default_reference_depth")]
     pub depth: u64,
+    #[serde(default = "default_claim_delay_slots")]
+    pub claim_delay_slots: u64,
+    #[serde(default = "default_claim_margin")]
+    pub claim_margin: u64,
+    #[serde(default = "default_claim_count_tolerance")]
+    pub claim_count_tolerance: u64,
+    #[serde(default = "default_node_stale_slots")]
+    pub node_stale_slots: u64,
 }
 
 impl Default for ReferenceCheckConfig {
@@ -47,6 +57,10 @@ impl Default for ReferenceCheckConfig {
             exclude_provider: None,
             interval: default_reference_interval(),
             depth: default_reference_depth(),
+            claim_delay_slots: default_claim_delay_slots(),
+            claim_margin: default_claim_margin(),
+            claim_count_tolerance: default_claim_count_tolerance(),
+            node_stale_slots: default_node_stale_slots(),
         }
     }
 }
@@ -56,6 +70,22 @@ const fn default_reference_interval() -> Duration {
 }
 
 const fn default_reference_depth() -> u64 {
+    64
+}
+
+const fn default_claim_delay_slots() -> u64 {
+    32
+}
+
+const fn default_claim_margin() -> u64 {
+    16
+}
+
+const fn default_claim_count_tolerance() -> u64 {
+    8
+}
+
+const fn default_node_stale_slots() -> u64 {
     64
 }
 
@@ -145,7 +175,7 @@ const fn default_request_timeout() -> Duration {
 }
 
 const fn default_max_slot_lag() -> u64 {
-    150
+    30
 }
 
 const fn default_poll_interval() -> Duration {

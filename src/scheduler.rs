@@ -7,6 +7,7 @@ use tokio::time::sleep;
 use crate::config::CheckConfig;
 use crate::metrics::Metrics;
 use crate::providers::ProviderEndpoint;
+use crate::reference_check::ClaimSink;
 use crate::reference_slot::ReferenceSlot;
 use crate::rpc::{CallResult, CallStatus, ErrorKind, RequestContext, RpcClient};
 
@@ -17,6 +18,7 @@ pub fn spawn_checks(
     metrics: Metrics,
     reference: ReferenceSlot,
     max_slot_lag: u64,
+    claims: Option<ClaimSink>,
 ) {
     let shared = SharedState::default();
     for endpoint in endpoints {
@@ -30,6 +32,7 @@ pub fn spawn_checks(
                 reference: reference.clone(),
                 shared: shared.clone(),
                 max_slot_lag,
+                claims: claims.clone(),
             };
             tokio::spawn(task.run());
         }
@@ -45,6 +48,7 @@ struct CheckTask {
     reference: ReferenceSlot,
     shared: SharedState,
     max_slot_lag: u64,
+    claims: Option<ClaimSink>,
 }
 
 impl CheckTask {
@@ -78,6 +82,9 @@ impl CheckTask {
             .record_call(&self.provider, method, result, status);
 
         if status.is_success() {
+            if let Some(sink) = &self.claims {
+                sink.submit(&self.provider, method, result);
+            }
             if let Some(slot) = result.observed_slot {
                 self.reference.observe(slot);
                 if let Some(lag) = self.reference.lag_for(slot) {

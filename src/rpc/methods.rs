@@ -2,7 +2,7 @@ use base64::Engine;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use crate::rpc::RequestContext;
+use crate::rpc::{AccountSample, ClaimPayload, RequestContext};
 
 const USDC_MINT: &str = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const USDT_MINT: &str = "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB";
@@ -106,14 +106,7 @@ impl RpcMethod {
             Self::GetSignaturesForAddress => {
                 json!([FALLBACK_ADDRESS, { "limit": SIGNATURES_LIMIT, "commitment": "confirmed" }])
             }
-            Self::GetBlockRecent => {
-                let slot = ctx.tip_slot?.saturating_sub(BLOCK_CONFIRMATION_DEPTH);
-                block_params(slot)
-            }
-            Self::GetBlockArchival => {
-                let slot = ctx.tip_slot?.checked_sub(ARCHIVAL_SLOT_DEPTH)?;
-                block_params(slot)
-            }
+            Self::GetBlockRecent | Self::GetBlockArchival => block_params(self.probed_slot(ctx)?),
             Self::GetTransactionRecent => transaction_params(ctx.recent_signature.clone()?),
             Self::GetTransactionArchival => transaction_params(ctx.archival_signature.clone()?),
         };
@@ -148,6 +141,59 @@ impl RpcMethod {
                     && result.get("transaction").is_some()
             }
             Self::GetSignaturesForAddress => result.as_array().is_some_and(|a| !a.is_empty()),
+        }
+    }
+
+    pub fn probed_slot(self, ctx: &RequestContext) -> Option<u64> {
+        match self {
+            Self::GetBlockRecent => Some(ctx.tip_slot?.saturating_sub(BLOCK_CONFIRMATION_DEPTH)),
+            Self::GetBlockArchival => ctx.tip_slot?.checked_sub(ARCHIVAL_SLOT_DEPTH),
+            _ => None,
+        }
+    }
+
+    pub fn claim_payload(self, result: &Value, ctx: &RequestContext) -> Option<ClaimPayload> {
+        match self {
+            Self::GetLatestBlockhash => Some(ClaimPayload::Blockhash {
+                slot: self.observed_slot(result)?,
+                blockhash: non_empty_string(value_of(result).get("blockhash"))?,
+            }),
+            Self::GetBlockRecent => Some(ClaimPayload::Blockhash {
+                slot: self.probed_slot(ctx)?,
+                blockhash: non_empty_string(result.get("blockhash"))?,
+            }),
+            Self::GetProgramAccounts | Self::GetTokenAccountsByOwner => {
+                let entries = value_of(result).as_array()?;
+                Some(ClaimPayload::Accounts {
+                    slot: self.observed_slot(result),
+                    count: entries.len() as u64,
+                    sample: sample_accounts(entries),
+                })
+            }
+            Self::GetTransactionRecent => Some(ClaimPayload::Transaction {
+                slot: result.get("slot")?.as_u64()?,
+                signature: ctx.recent_signature.clone()?,
+            }),
+            Self::GetSignaturesForAddress => {
+                let first = result.as_array()?.first()?;
+                Some(ClaimPayload::Transaction {
+                    slot: first.get("slot")?.as_u64()?,
+                    signature: non_empty_string(first.get("signature"))?,
+                })
+            }
+            Self::GetAccountInfo => {
+                let b64 = value_of(result)
+                    .get("data")?
+                    .as_array()?
+                    .first()?
+                    .as_str()?;
+                let bytes = base64::engine::general_purpose::STANDARD.decode(b64).ok()?;
+                Some(ClaimPayload::Clock {
+                    slot: u64::from_le_bytes(bytes.get(0..8)?.try_into().ok()?),
+                    unix_timestamp: i64::from_le_bytes(bytes.get(32..40)?.try_into().ok()?),
+                })
+            }
+            _ => None,
         }
     }
 
@@ -265,11 +311,12 @@ fn block_params(slot: u64) -> Value {
 }
 
 fn pick_batch(pool: &[String], seed: Option<u64>) -> Vec<String> {
-    if pool.len() >= MULTI_ACCOUNT_BATCH {
+    let rotating = MULTI_ACCOUNT_BATCH - 1;
+    if pool.len() >= rotating {
         let start = (seed.unwrap_or(0) as usize) % pool.len();
-        (0..MULTI_ACCOUNT_BATCH)
-            .map(|k| pool[(start + k) % pool.len()].clone())
-            .collect()
+        let mut out = vec![FALLBACK_ADDRESS.to_owned()];
+        out.extend((0..rotating).map(|k| pool[(start + k) % pool.len()].clone()));
+        out
     } else {
         MULTI_ACCOUNTS.iter().map(|s| (*s).to_owned()).collect()
     }
@@ -282,7 +329,23 @@ fn clock_slot_from_value(value: &Value) -> Option<u64> {
     Some(u64::from_le_bytes(slot))
 }
 
-fn gpa_account_matches(entry: &Value, owner: &[u8]) -> bool {
+pub fn probe_owner_bytes() -> Vec<u8> {
+    bs58::decode(GPA_TOKEN_OWNER).into_vec().unwrap_or_default()
+}
+
+pub fn gpa_count_params() -> Value {
+    json!([TOKEN_PROGRAM, {
+        "encoding": "base64",
+        "commitment": "confirmed",
+        "dataSlice": { "offset": 0, "length": 0 },
+        "filters": [
+            { "dataSize": TOKEN_ACCOUNT_LEN },
+            { "memcmp": { "offset": TOKEN_ACCOUNT_OWNER_OFFSET, "bytes": GPA_TOKEN_OWNER } },
+        ],
+    }])
+}
+
+pub fn gpa_account_matches(entry: &Value, owner: &[u8]) -> bool {
     let account = entry.get("account").unwrap_or(entry);
     if account.get("owner").and_then(Value::as_str) != Some(TOKEN_PROGRAM) {
         return false;
@@ -308,6 +371,46 @@ fn value_of(result: &Value) -> &Value {
 
 fn non_empty_str(value: Option<&Value>) -> bool {
     value.and_then(Value::as_str).is_some_and(|s| !s.is_empty())
+}
+
+fn non_empty_string(value: Option<&Value>) -> Option<String> {
+    value
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+        .map(str::to_owned)
+}
+
+const CLAIM_SAMPLE: usize = 3;
+
+fn sample_accounts(entries: &[Value]) -> Vec<AccountSample> {
+    if entries.is_empty() {
+        return Vec::new();
+    }
+    let picks = [0, entries.len() / 2, entries.len() - 1];
+    let mut out: Vec<AccountSample> = Vec::with_capacity(CLAIM_SAMPLE);
+    for &i in picks.iter() {
+        let entry = &entries[i];
+        let Some(pubkey) = non_empty_string(entry.get("pubkey")) else {
+            continue;
+        };
+        if out.iter().any(|s| s.pubkey == pubkey) {
+            continue;
+        }
+        let account = entry.get("account").unwrap_or(entry);
+        let Some(data) = account
+            .get("data")
+            .and_then(Value::as_array)
+            .and_then(|a| a.first())
+            .and_then(Value::as_str)
+        else {
+            continue;
+        };
+        out.push(AccountSample {
+            pubkey,
+            data: data.to_owned(),
+        });
+    }
+    out
 }
 
 #[cfg(test)]
@@ -408,7 +511,12 @@ mod tests {
             ..RequestContext::default()
         };
         let params = RpcMethod::GetMultipleAccounts.build_params(&ctx).unwrap();
-        assert_eq!(params[0].as_array().unwrap().len(), MULTI_ACCOUNT_BATCH);
+        let batch = params[0].as_array().unwrap();
+        assert_eq!(batch.len(), MULTI_ACCOUNT_BATCH);
+        assert_eq!(batch[0], json!(FALLBACK_ADDRESS));
+        assert!(batch[1..]
+            .iter()
+            .all(|k| k.as_str().unwrap().starts_with("acct")));
     }
 
     #[test]
@@ -540,6 +648,100 @@ mod tests {
         assert!(!RpcMethod::GetTransactionArchival.is_valid_result(&json!({ "slot": 1 })));
         assert!(RpcMethod::GetTransactionArchival
             .is_valid_result(&json!({ "slot": 1, "transaction": {} })));
+    }
+
+    #[test]
+    fn claim_payload_extracts_blockhash_claims() {
+        let ctx = ctx_with_tip(1_000);
+        let latest = json!({ "context": { "slot": 999 }, "value": { "blockhash": "abc" } });
+        assert_eq!(
+            RpcMethod::GetLatestBlockhash.claim_payload(&latest, &ctx),
+            Some(ClaimPayload::Blockhash {
+                slot: 999,
+                blockhash: "abc".into()
+            })
+        );
+        let block = json!({ "blockhash": "xyz", "transactions": [{}] });
+        assert_eq!(
+            RpcMethod::GetBlockRecent.claim_payload(&block, &ctx),
+            Some(ClaimPayload::Blockhash {
+                slot: 1_000 - BLOCK_CONFIRMATION_DEPTH,
+                blockhash: "xyz".into()
+            })
+        );
+    }
+
+    #[test]
+    fn claim_payload_samples_accounts_with_count() {
+        let entries: Vec<Value> = (0..10)
+            .map(|n| {
+                json!({ "pubkey": format!("k{n}"), "account": { "data": [format!("d{n}"), "base64"] } })
+            })
+            .collect();
+        let result = json!({ "context": { "slot": 500 }, "value": entries });
+        let Some(ClaimPayload::Accounts {
+            slot,
+            count,
+            sample,
+        }) = RpcMethod::GetProgramAccounts.claim_payload(&result, &RequestContext::default())
+        else {
+            panic!("expected accounts payload");
+        };
+        assert_eq!(slot, Some(500));
+        assert_eq!(count, 10);
+        let keys: Vec<&str> = sample.iter().map(|s| s.pubkey.as_str()).collect();
+        assert_eq!(keys, vec!["k0", "k5", "k9"]);
+        assert_eq!(sample[0].data, "d0");
+    }
+
+    #[test]
+    fn claim_payload_extracts_transaction_claims() {
+        let ctx = RequestContext {
+            recent_signature: Some("sig".into()),
+            ..RequestContext::default()
+        };
+        let tx = json!({ "slot": 777, "transaction": {} });
+        assert_eq!(
+            RpcMethod::GetTransactionRecent.claim_payload(&tx, &ctx),
+            Some(ClaimPayload::Transaction {
+                slot: 777,
+                signature: "sig".into()
+            })
+        );
+        let sigs =
+            json!([{ "signature": "first", "slot": 888 }, { "signature": "second", "slot": 800 }]);
+        assert_eq!(
+            RpcMethod::GetSignaturesForAddress.claim_payload(&sigs, &ctx),
+            Some(ClaimPayload::Transaction {
+                slot: 888,
+                signature: "first".into()
+            })
+        );
+    }
+
+    #[test]
+    fn claim_payload_parses_the_clock_sysvar() {
+        let slot: u64 = 123;
+        let ts: i64 = 1_700_000_000;
+        let mut data = slot.to_le_bytes().to_vec();
+        data.extend_from_slice(&[0u8; 24]);
+        data.extend_from_slice(&ts.to_le_bytes());
+        let b64 = base64::engine::general_purpose::STANDARD.encode(&data);
+        let result = json!({ "value": { "data": [b64, "base64"] } });
+        assert_eq!(
+            RpcMethod::GetAccountInfo.claim_payload(&result, &RequestContext::default()),
+            Some(ClaimPayload::Clock {
+                slot: 123,
+                unix_timestamp: ts
+            })
+        );
+    }
+
+    #[test]
+    fn methods_without_verifiable_content_yield_no_payload() {
+        let ctx = RequestContext::default();
+        assert_eq!(RpcMethod::GetSlot.claim_payload(&json!(42), &ctx), None);
+        assert_eq!(RpcMethod::GetHealth.claim_payload(&json!("ok"), &ctx), None);
     }
 
     #[test]

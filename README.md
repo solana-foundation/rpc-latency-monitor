@@ -274,16 +274,26 @@ The measurements are designed to be neutral and reproducible:
   losing on consistency.
 - **Per-region.** Identical checks run from every vantage point, each tagged with a `region` label,
   so latency reflects the network path a real client would see from that location.
-- **Neutral reference tip.** Slot lag is measured against the highest `processed` slot observed
-  across *all* providers, so no single provider defines "the truth."
+- **Neutral reference tip.** Slot lag is measured against the Foundation's own reference RPC node
+  when configured (`reference_slot.source: endpoint`), combined with the highest `processed` slot
+  observed across *all* providers by `max()` — no single provider can define "the truth" or poison
+  the tip for others.
+- **Content verification.** Provider responses are verified after the fact against the reference
+  node — blockhashes, account existence and counts, transaction slots, clock timestamps — so data
+  stamped with a fresh slot must actually be fresh. See
+  [`docs/anti-gaming.md`](./docs/anti-gaming.md) for the full design, including how delayed-but-honest
+  data is kept distinct from fabrication.
 - **gPA index (note).** The `get_program_accounts` check is a deliberately heavy query (filtered
   token-account scan). It is the most demanding read in the suite and is tracked as its own signal of
   how providers handle expensive index-style requests; it is weighted separately from the
   lightweight checks rather than averaged into them.
 
-Outcomes are classified precisely — `timeout`, `transport`, `http_status`, `rpc_error`, `decode`,
-`empty` — so a slow-but-correct provider is never conflated with a fast-but-failing (or fast-but-empty)
-one.
+Outcomes are classified precisely — see [`docs/error-kinds.md`](./docs/error-kinds.md) for the full
+label taxonomy — so a slow-but-correct provider is never conflated with a fast-but-failing (or
+fast-but-empty) one. HTTP 4xx (including 429) is neutral: it reflects the monitor's own key, request,
+or rate plan, never provider serving quality. The rotating `get_multiple_accounts` batch is anchored
+by one permanent account so a batch of since-closed ephemeral accounts can't register as a provider
+failure.
 
 ## Contributing
 

@@ -23,16 +23,46 @@ reference_slot:
   # endpoint: "https://api.mainnet-beta.solana.com"
   # poll_interval: "1s"
 
-# Cross-check each provider's finalized getBlock blockhash against a trusted
-# reference RPC (ground truth): a blockhash is unforgeable, so a mismatch means
-# wrong/fabricated data. The reference is used only for correctness, never for
-# latency, so a slow/lagging reference never distorts the numbers. Disabled
-# unless rpc_url is set.
+# Verify provider responses against a trusted reference RPC (ground truth):
+# a blockhash is unforgeable, so a mismatch means wrong/fabricated data. Two
+# mechanisms, both requiring `claim_checks: true` (or MONITOR_CLAIM_CHECKS=true)
+# AND a reference_check.rpc_url — with claim_checks false (the default) neither
+# runs, regardless of rpc_url. Both are fail-open (a slow or unreachable
+# reference records `skipped`, never penalizes a provider):
+#   1. Periodic cross-check: each provider's finalized getBlock blockhash at
+#      tip-depth vs the reference (rpc_reference_check_total).
+#   2. Claim verification:
+#      successful probe responses yield claims verified against the reference
+#      node >= claim_delay_slots later, emitted as
+#      rpc_claim_check_total{provider, method, result} with result one of
+#      match | drift | mismatch | missing | skipped | implausible.
+#        - getLatestBlockhash / getBlock_recent: (slot, blockhash) vs the
+#          node's getBlock (blockhashes are unforgeable)
+#        - getProgramAccounts / getTokenAccountsByOwner: account count vs the
+#          node's own count (claim_count_tolerance), plus sampled pubkeys that
+#          must exist on the node with the probe's owner/size; byte-identical
+#          data = match, legitimate balance movement = drift
+#        - getTransaction_recent / getSignaturesForAddress: the claimed
+#          (signature, slot) must be known to the node at the same slot
+#        - getAccountInfo (clock sysvar): unix_timestamp within 2 minutes of
+#          wall time, else implausible
+#        - any slot-bearing response claiming more than claim_margin slots
+#          ahead of the node tip is implausible (a claim about the future)
+#      If the node itself trails the fleet-observed tip by more than
+#      node_stale_slots, verdicts become `skipped` and implausibility is not
+#      flagged (provider values are trusted while our node lags); the lag is
+#      exported as rpc_reference_node_lag.
+# The reference is used only for correctness, never for latency.
+# claim_checks: false
 # reference_check:
-#   rpc_url: "https://beta.helius-rpc.com/?api-key=${HELIUS_API_KEY}"
+#   rpc_url: "http://<reference-node>:8899"
 #   exclude_provider: helius   # don't judge the reference against itself
 #   interval: "5m"
 #   depth: 64                  # checked slot = reference finalized tip - depth
+#   claim_delay_slots: 32      # settle time before verifying a claim
+#   claim_margin: 16           # slots a claim may lead the reference tip
+#   claim_count_tolerance: 8   # allowed drift vs the node's own gPA count
+#   node_stale_slots: 64       # node lag beyond which verdicts are skipped
 
 # RPC providers to benchmark. `url` may contain a ${ENV_VAR} placeholder; the
 # whole api-key/url secret is supplied via the environment.

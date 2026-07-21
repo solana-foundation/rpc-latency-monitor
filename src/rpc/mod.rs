@@ -25,6 +25,52 @@ pub struct CallResult {
     pub signature: Option<String>,
     pub archival_signature: Option<String>,
     pub accounts: Vec<String>,
+    pub claim: Option<ClaimPayload>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ClaimPayload {
+    Blockhash {
+        slot: u64,
+        blockhash: String,
+    },
+    Accounts {
+        slot: Option<u64>,
+        count: u64,
+        sample: Vec<AccountSample>,
+    },
+    Transaction {
+        slot: u64,
+        signature: String,
+    },
+    Clock {
+        slot: u64,
+        unix_timestamp: i64,
+    },
+}
+
+impl ClaimPayload {
+    pub fn slot(&self) -> Option<u64> {
+        match self {
+            Self::Blockhash { slot, .. }
+            | Self::Transaction { slot, .. }
+            | Self::Clock { slot, .. } => Some(*slot),
+            Self::Accounts { slot, .. } => *slot,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AccountSample {
+    pub pubkey: String,
+    pub data: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RawResponse {
+    Result(Value),
+    RpcError(i64),
+    Unavailable,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -51,8 +97,15 @@ impl CallStatus {
         matches!(self, Self::Success)
     }
 
+    const fn is_client_side(self) -> bool {
+        matches!(self, Self::Error(ErrorKind::HttpStatus(400..=499)))
+    }
+
     #[inline]
     pub const fn label(self) -> &'static str {
+        if self.is_client_side() {
+            return "skipped";
+        }
         match self {
             Self::Success => "success",
             Self::Skipped => "skipped",
@@ -62,7 +115,7 @@ impl CallStatus {
 
     #[inline]
     pub const fn is_error(self) -> bool {
-        matches!(self, Self::Error(_))
+        matches!(self, Self::Error(_)) && !self.is_client_side()
     }
 
     #[inline]
@@ -86,7 +139,15 @@ impl ErrorKind {
                 500..=599 => "http_5xx",
                 _ => "http_status",
             },
-            Self::RpcError(_) => "rpc_error",
+            Self::RpcError(code) => match code {
+                -32004 => "rpc_block_unavailable",
+                -32005 => "rpc_node_unhealthy",
+                -32007 | -32009 => "rpc_slot_skipped",
+                -32011 => "rpc_tx_history_unavailable",
+                -32601 => "rpc_method_not_found",
+                -32602 => "rpc_invalid_params",
+                _ => "rpc_error",
+            },
             Self::Decode => "decode",
             Self::Empty => "empty",
             Self::Stale => "stale",
@@ -115,18 +176,36 @@ impl RpcClient {
     }
 
     pub async fn raw_call(&self, url: &str, method: &str, params: Value) -> Option<Value> {
+        match self.raw_call_checked(url, method, params).await {
+            RawResponse::Result(value) => Some(value),
+            _ => None,
+        }
+    }
+
+    pub async fn raw_call_checked(&self, url: &str, method: &str, params: Value) -> RawResponse {
         let body = serde_json::json!({
             "jsonrpc": "2.0",
             "id": self.next_id.fetch_add(1, Ordering::Relaxed),
             "method": method,
             "params": params,
         });
-        let response = self.http.post(url).json(&body).send().await.ok()?;
+        let Ok(response) = self.http.post(url).json(&body).send().await else {
+            return RawResponse::Unavailable;
+        };
         if !response.status().is_success() {
-            return None;
+            return RawResponse::Unavailable;
         }
-        let json: Value = response.json().await.ok()?;
-        json.get("result").cloned()
+        let Ok(json) = response.json::<Value>().await else {
+            return RawResponse::Unavailable;
+        };
+        if let Some(error) = json.get("error") {
+            let code = error.get("code").and_then(Value::as_i64).unwrap_or(0);
+            return RawResponse::RpcError(code);
+        }
+        match json.get("result") {
+            Some(value) => RawResponse::Result(value.clone()),
+            None => RawResponse::Unavailable,
+        }
     }
 
     pub async fn call(
@@ -159,6 +238,7 @@ impl RpcClient {
                     signature: None,
                     archival_signature: None,
                     accounts: Vec::new(),
+                    claim: None,
                 });
             }
         };
@@ -168,7 +248,7 @@ impl RpcClient {
         let latency = start.elapsed();
 
         let parsed = match body {
-            Ok(bytes) => classify(http_status, &bytes, method),
+            Ok(bytes) => classify(http_status, &bytes, method, ctx),
             Err(_) => Parsed::error(ErrorKind::Transport),
         };
         Some(CallResult {
@@ -178,6 +258,7 @@ impl RpcClient {
             signature: parsed.signature,
             archival_signature: parsed.archival_signature,
             accounts: parsed.accounts,
+            claim: parsed.claim,
         })
     }
 }
@@ -188,6 +269,7 @@ struct Parsed {
     signature: Option<String>,
     archival_signature: Option<String>,
     accounts: Vec<String>,
+    claim: Option<ClaimPayload>,
 }
 
 impl Parsed {
@@ -198,6 +280,7 @@ impl Parsed {
             signature: None,
             archival_signature: None,
             accounts: Vec::new(),
+            claim: None,
         }
     }
 }
@@ -213,7 +296,7 @@ fn send_error_kind(error: &reqwest::Error) -> ErrorKind {
     }
 }
 
-fn classify(status: StatusCode, body: &[u8], method: RpcMethod) -> Parsed {
+fn classify(status: StatusCode, body: &[u8], method: RpcMethod, ctx: &RequestContext) -> Parsed {
     if !status.is_success() {
         return Parsed::error(ErrorKind::HttpStatus(status.as_u16()));
     }
@@ -229,6 +312,7 @@ fn classify(status: StatusCode, body: &[u8], method: RpcMethod) -> Parsed {
                 signature: None,
                 archival_signature: None,
                 accounts: Vec::new(),
+                claim: None,
             };
         }
         return Parsed::error(ErrorKind::RpcError(code));
@@ -245,6 +329,7 @@ fn classify(status: StatusCode, body: &[u8], method: RpcMethod) -> Parsed {
         signature: method.recent_signature(result),
         archival_signature: method.archival_signature(result),
         accounts: method.recent_accounts(result),
+        claim: method.claim_payload(result, ctx),
     }
 }
 
@@ -262,6 +347,7 @@ mod tests {
             StatusCode::OK,
             &body(r#"{"jsonrpc":"2.0","result":12345,"id":1}"#),
             RpcMethod::GetSlot,
+            &RequestContext::default(),
         );
         assert!(parsed.status.is_success());
         assert_eq!(parsed.observed_slot, Some(12345));
@@ -275,6 +361,7 @@ mod tests {
                 r#"{"jsonrpc":"2.0","result":{"context":{"slot":999},"value":{"blockhash":"abc"}},"id":1}"#,
             ),
             RpcMethod::GetLatestBlockhash,
+            &RequestContext::default(),
         );
         assert!(parsed.status.is_success());
         assert_eq!(parsed.observed_slot, Some(999));
@@ -286,6 +373,7 @@ mod tests {
             StatusCode::OK,
             &body(r#"{"jsonrpc":"2.0","result":{"context":{"slot":1},"value":[]},"id":1}"#),
             RpcMethod::GetProgramAccounts,
+            &RequestContext::default(),
         );
         assert_eq!(parsed.status, CallStatus::Error(ErrorKind::Empty));
         assert_eq!(parsed.observed_slot, None);
@@ -297,6 +385,7 @@ mod tests {
             StatusCode::OK,
             &body(r#"{"jsonrpc":"2.0","result":[{"signature":"abc"}],"id":1}"#),
             RpcMethod::GetSignaturesForAddress,
+            &RequestContext::default(),
         );
         assert_eq!(parsed.signature, Some("abc".to_string()));
     }
@@ -310,6 +399,7 @@ mod tests {
                     r#"{{"jsonrpc":"2.0","error":{{"code":{code},"message":"Slot 1 was skipped"}},"id":1}}"#
                 )),
                 RpcMethod::GetBlockRecent,
+                &RequestContext::default(),
             );
             assert_eq!(parsed.status, CallStatus::Skipped);
         }
@@ -327,6 +417,7 @@ mod tests {
                 r#"{"jsonrpc":"2.0","error":{"code":-32007,"message":"Slot 1 was skipped"},"id":1}"#,
             ),
             RpcMethod::GetTransactionRecent,
+            &RequestContext::default(),
         );
         assert_eq!(
             parsed.status,
@@ -340,6 +431,7 @@ mod tests {
             StatusCode::OK,
             &body(r#"{"jsonrpc":"2.0","error":{"code":-32005,"message":"unhealthy"},"id":1}"#),
             RpcMethod::GetHealth,
+            &RequestContext::default(),
         );
         assert_eq!(
             parsed.status,
@@ -354,6 +446,7 @@ mod tests {
             StatusCode::INTERNAL_SERVER_ERROR,
             &body("upstream down"),
             RpcMethod::GetSlot,
+            &RequestContext::default(),
         );
         assert_eq!(parsed.status, CallStatus::Error(ErrorKind::HttpStatus(500)));
     }
@@ -368,8 +461,48 @@ mod tests {
     }
 
     #[test]
+    fn known_rpc_codes_get_named_error_kinds() {
+        assert_eq!(
+            ErrorKind::RpcError(-32004).as_str(),
+            "rpc_block_unavailable"
+        );
+        assert_eq!(ErrorKind::RpcError(-32005).as_str(), "rpc_node_unhealthy");
+        assert_eq!(ErrorKind::RpcError(-32007).as_str(), "rpc_slot_skipped");
+        assert_eq!(ErrorKind::RpcError(-32009).as_str(), "rpc_slot_skipped");
+        assert_eq!(
+            ErrorKind::RpcError(-32011).as_str(),
+            "rpc_tx_history_unavailable"
+        );
+        assert_eq!(ErrorKind::RpcError(-32601).as_str(), "rpc_method_not_found");
+        assert_eq!(ErrorKind::RpcError(-32602).as_str(), "rpc_invalid_params");
+        assert_eq!(ErrorKind::RpcError(-99999).as_str(), "rpc_error");
+    }
+
+    #[test]
+    fn http_4xx_is_neutral_not_a_provider_error() {
+        for code in [400, 401, 403, 404, 429] {
+            let status = CallStatus::Error(ErrorKind::HttpStatus(code));
+            assert_eq!(status.label(), "skipped");
+            assert!(!status.is_error());
+            assert!(!status.is_success());
+        }
+        assert_eq!(
+            CallStatus::Error(ErrorKind::HttpStatus(429)).error_kind(),
+            Some("http_429")
+        );
+        let server_side = CallStatus::Error(ErrorKind::HttpStatus(503));
+        assert_eq!(server_side.label(), "error");
+        assert!(server_side.is_error());
+    }
+
+    #[test]
     fn malformed_body_is_a_decode_error() {
-        let parsed = classify(StatusCode::OK, &body("not json"), RpcMethod::GetSlot);
+        let parsed = classify(
+            StatusCode::OK,
+            &body("not json"),
+            RpcMethod::GetSlot,
+            &RequestContext::default(),
+        );
         assert_eq!(parsed.status, CallStatus::Error(ErrorKind::Decode));
     }
 
