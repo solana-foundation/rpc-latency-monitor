@@ -44,10 +44,6 @@ reference_slot:
 #          data = match, legitimate balance movement = drift
 #        - getTransaction_recent / getSignaturesForAddress: the claimed
 #          (signature, slot) must be known to the node at the same slot
-#        - getBlock_archival / getTransaction_archival: verified the same way
-#          but against `archival_rpc_url` (a trusted archival endpoint) — our
-#          reference node runs a limited ledger and has purged ~40M-slots-ago
-#          history. Left unset (the default) these two verdicts are `skipped`.
 #        - getAccountInfo (clock sysvar): unix_timestamp within 2 minutes of
 #          wall time, else implausible
 #        - any slot-bearing response claiming more than claim_margin slots
@@ -57,14 +53,20 @@ reference_slot:
 #      flagged (provider values are trusted while our node lags); the lag is
 #      exported as rpc_reference_node_lag.
 # The reference is used only for correctness, never for latency.
+#
+# Archival (getBlock_archival / getTransaction_archival) is NOT verified against
+# the reference node — the node runs a limited ledger and has purged ~40M-slots-
+# ago history. Instead a coordinated archival round picks one random, never-
+# repeated old slot, queries every provider for it, and cross-checks their
+# blockhashes against each other: the majority is truth, an outlier is a
+# `mismatch`. This runs always (it also measures archival latency), needs no
+# external endpoint, and — because the slot is random and never reused — a
+# provider can't pre-seed a canned answer. archival_interval controls the
+# cadence (default 30s); the checks list must NOT include the archival methods
+# (this round owns them).
 # claim_checks: false
 # reference_check:
 #   rpc_url: "http://<reference-node>:8899"
-#   archival_rpc_url: ""       # trusted archival RPC for the two archival
-#                              # methods; ideally NOT one of the measured
-#                              # providers (a provider shouldn't be graded by
-#                              # its own archival tier). Empty = archival
-#                              # verdicts are skipped.
 #   exclude_provider: helius   # don't judge the reference against itself
 #   interval: "5m"
 #   depth: 64                  # checked slot = reference finalized tip - depth
@@ -150,14 +152,12 @@ checks:
   - method: get_signatures_for_address
     interval: "10s"
     jitter: "2s"
-  - method: get_block_archival
-    interval: "30s"
-    jitter: "5s"
-    timeout: "30s"
-  - method: get_transaction_archival
-    interval: "30s"
-    jitter: "5s"
-    timeout: "30s"
+# get_block_archival / get_transaction_archival are NOT listed here: the
+# coordinated archival round (see reference_check notes above) owns them, on a
+# random shared slot across all providers. Listing them here would be ignored.
 
 # Per-request timeout for outbound RPC calls.
 request_timeout: "10s"
+
+# Cadence of the coordinated archival cross-provider round.
+archival_interval: "30s"

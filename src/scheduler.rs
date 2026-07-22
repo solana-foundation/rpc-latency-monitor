@@ -27,6 +27,12 @@ pub fn spawn_checks(
     let gpa_targets = Arc::new(gpa_targets);
     for endpoint in endpoints {
         for check in checks {
+            if matches!(
+                check.method,
+                RpcMethod::GetBlockArchival | RpcMethod::GetTransactionArchival
+            ) {
+                continue;
+            }
             let task = CheckTask {
                 provider: endpoint.name.clone(),
                 url: endpoint.url.clone(),

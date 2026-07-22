@@ -1,8 +1,9 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use serde_json::json;
+use rand::RngExt;
+use serde_json::{json, Value};
 use tokio::time::sleep;
 
 use crate::config::{GpaTarget, ReferenceCheckConfig};
@@ -10,7 +11,14 @@ use crate::metrics::Metrics;
 use crate::providers::ProviderEndpoint;
 use crate::reference_slot::ReferenceSlot;
 use crate::rpc::methods::{self, RpcMethod};
-use crate::rpc::{AccountSample, CallResult, ClaimPayload, RawResponse, RpcClient};
+use crate::rpc::{
+    AccountSample, CallResult, CallStatus, ClaimPayload, ErrorKind, RawResponse, RpcClient,
+};
+
+const ARCHIVAL_MIN_DEPTH: u64 = 40_000_000;
+const ARCHIVAL_FLOOR: u64 = 20_000_000;
+const ARCHIVAL_SLOT_PICK_TRIES: u32 = 32;
+const ARCHIVAL_MIN_QUORUM: usize = 2;
 
 const LATEST_BLOCKHASH_WINDOW: u64 = 8;
 const CLAIM_BUFFER_CAP: usize = 1024;
@@ -95,6 +103,240 @@ async fn block_hash(client: &RpcClient, url: &str, slot: u64) -> Option<String> 
         .as_str()
         .filter(|s| !s.is_empty())
         .map(str::to_owned)
+}
+
+pub fn spawn_archival_check(
+    endpoints: &[ProviderEndpoint],
+    client: Arc<RpcClient>,
+    metrics: Metrics,
+    reference: ReferenceSlot,
+    interval: Duration,
+) {
+    let providers: Vec<ProviderEndpoint> = endpoints.to_vec();
+    if providers.len() < ARCHIVAL_MIN_QUORUM {
+        return;
+    }
+    tokio::spawn(async move {
+        let mut used: HashSet<u64> = HashSet::new();
+        loop {
+            sleep(interval).await;
+            run_archival_round(&client, &providers, &metrics, &reference, &mut used).await;
+        }
+    });
+}
+
+async fn run_archival_round(
+    client: &RpcClient,
+    providers: &[ProviderEndpoint],
+    metrics: &Metrics,
+    reference: &ReferenceSlot,
+    used: &mut HashSet<u64>,
+) {
+    let Some(tip) = reference.current() else {
+        return;
+    };
+    let Some(ceil) = tip.checked_sub(ARCHIVAL_MIN_DEPTH) else {
+        return;
+    };
+    if ceil <= ARCHIVAL_FLOOR {
+        return;
+    }
+    let Some(slot) = pick_unused_slot(ARCHIVAL_FLOOR, ceil, used) else {
+        return;
+    };
+
+    let mut observed: Vec<(String, Option<String>, Option<String>)> = Vec::new();
+    for provider in providers {
+        let (result, hash, sig) = timed_archival_block(client, &provider.url, slot).await;
+        let status = result.status;
+        metrics.record_call(
+            &provider.name,
+            RpcMethod::GetBlockArchival,
+            &result,
+            status,
+            "",
+        );
+        observed.push((provider.name.clone(), hash, sig));
+    }
+
+    let Some((truth, truth_sig)) = majority_block(&observed) else {
+        return;
+    };
+    for (name, hash, _) in &observed {
+        let verdict = match hash {
+            Some(h) if *h == truth => "match",
+            Some(_) => "mismatch",
+            None => "skipped",
+        };
+        metrics.record_claim_check(name, RpcMethod::GetBlockArchival, "", verdict);
+    }
+
+    let Some(sig) = truth_sig else {
+        return;
+    };
+    for provider in providers {
+        let (result, tx_slot) = timed_archival_tx(client, &provider.url, &sig).await;
+        let status = result.status;
+        metrics.record_call(
+            &provider.name,
+            RpcMethod::GetTransactionArchival,
+            &result,
+            status,
+            "",
+        );
+        let verdict = match tx_slot {
+            Some(s) if s == slot => "match",
+            Some(_) => "mismatch",
+            None => "skipped",
+        };
+        metrics.record_claim_check(
+            &provider.name,
+            RpcMethod::GetTransactionArchival,
+            "",
+            verdict,
+        );
+    }
+}
+
+fn pick_unused_slot(floor: u64, ceil: u64, used: &mut HashSet<u64>) -> Option<u64> {
+    let mut rng = rand::rng();
+    for _ in 0..ARCHIVAL_SLOT_PICK_TRIES {
+        let slot = rng.random_range(floor..=ceil);
+        if used.insert(slot) {
+            return Some(slot);
+        }
+    }
+    None
+}
+
+fn majority_block(
+    observed: &[(String, Option<String>, Option<String>)],
+) -> Option<(String, Option<String>)> {
+    let mut counts: HashMap<&str, usize> = HashMap::new();
+    for (_, hash, _) in observed {
+        if let Some(h) = hash {
+            *counts.entry(h.as_str()).or_insert(0) += 1;
+        }
+    }
+    let (winner, votes) = counts.into_iter().max_by_key(|&(_, n)| n)?;
+    if votes < ARCHIVAL_MIN_QUORUM {
+        return None;
+    }
+    let winner = winner.to_string();
+    let sig = observed
+        .iter()
+        .find(|(_, h, _)| h.as_deref() == Some(winner.as_str()))
+        .and_then(|(_, _, s)| s.clone());
+    Some((winner, sig))
+}
+
+fn archival_result(latency: Duration, status: CallStatus) -> CallResult {
+    CallResult {
+        latency,
+        status,
+        observed_slot: None,
+        signature: None,
+        archival_signature: None,
+        accounts: Vec::new(),
+        claim: None,
+    }
+}
+
+async fn timed_archival_block(
+    client: &RpcClient,
+    url: &str,
+    slot: u64,
+) -> (CallResult, Option<String>, Option<String>) {
+    let params = json!([slot, {
+        "encoding": "json",
+        "transactionDetails": "full",
+        "rewards": false,
+        "commitment": "confirmed",
+        "maxSupportedTransactionVersion": 0,
+    }]);
+    let start = Instant::now();
+    let resp = client.raw_call_checked(url, "getBlock", params).await;
+    let latency = start.elapsed();
+    match resp {
+        RawResponse::Result(value) => {
+            let hash = value
+                .get("blockhash")
+                .and_then(Value::as_str)
+                .filter(|s| !s.is_empty())
+                .map(str::to_owned);
+            let sig = first_signature(&value);
+            let status = if hash.is_some() {
+                CallStatus::Success
+            } else {
+                CallStatus::Error(ErrorKind::Empty)
+            };
+            (archival_result(latency, status), hash, sig)
+        }
+        RawResponse::RpcError(-32007 | -32009) => {
+            (archival_result(latency, CallStatus::Skipped), None, None)
+        }
+        RawResponse::RpcError(code) => (
+            archival_result(latency, CallStatus::Error(ErrorKind::RpcError(code))),
+            None,
+            None,
+        ),
+        RawResponse::Unavailable => (
+            archival_result(latency, CallStatus::Error(ErrorKind::Transport)),
+            None,
+            None,
+        ),
+    }
+}
+
+fn first_signature(block: &Value) -> Option<String> {
+    block
+        .get("transactions")?
+        .as_array()?
+        .first()?
+        .get("transaction")?
+        .get("signatures")?
+        .as_array()?
+        .first()?
+        .as_str()
+        .map(str::to_owned)
+}
+
+async fn timed_archival_tx(
+    client: &RpcClient,
+    url: &str,
+    signature: &str,
+) -> (CallResult, Option<u64>) {
+    let params = json!([signature, {
+        "encoding": "json",
+        "commitment": "confirmed",
+        "maxSupportedTransactionVersion": 0,
+    }]);
+    let start = Instant::now();
+    let resp = client.raw_call_checked(url, "getTransaction", params).await;
+    let latency = start.elapsed();
+    match resp {
+        RawResponse::Result(value) if value.is_null() => (
+            archival_result(latency, CallStatus::Error(ErrorKind::Empty)),
+            None,
+        ),
+        RawResponse::Result(value) => {
+            let tx_slot = value.get("slot").and_then(Value::as_u64);
+            let status = if tx_slot.is_some() {
+                CallStatus::Success
+            } else {
+                CallStatus::Error(ErrorKind::Empty)
+            };
+            (archival_result(latency, status), tx_slot)
+        }
+        RawResponse::RpcError(code) => (
+            archival_result(latency, CallStatus::Error(ErrorKind::RpcError(code))),
+            None,
+        ),
+        RawResponse::Unavailable => (
+            archival_result(latency, CallStatus::Error(ErrorKind::Transport)),
+            None,
+        ),
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -275,7 +517,7 @@ async fn run_verify_tick(
     for claim in due {
         let result = if claim.implausible {
             "implausible"
-        } else if node_stale && !is_archival(claim.method) {
+        } else if node_stale {
             "skipped"
         } else {
             judge_claim(client, config, &claim, &mut blocks, gpa_counts).await
@@ -286,14 +528,6 @@ async fn run_verify_tick(
         };
         metrics.record_claim_check(&claim.provider, claim.method, target, result);
     }
-}
-
-#[inline]
-fn is_archival(method: RpcMethod) -> bool {
-    matches!(
-        method,
-        RpcMethod::GetBlockArchival | RpcMethod::GetTransactionArchival
-    )
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -310,17 +544,10 @@ async fn judge_claim(
     blocks: &mut HashMap<u64, NodeBlock>,
     gpa_counts: &mut HashMap<String, (u64, Instant)>,
 ) -> &'static str {
-    let url = if is_archival(claim.method) {
-        if config.archival_rpc_url.is_empty() {
-            return "skipped";
-        }
-        &config.archival_rpc_url
-    } else {
-        &config.rpc_url
-    };
+    let url = &config.rpc_url;
     match &claim.payload {
         Some(ClaimPayload::Blockhash { blockhash, .. }) => match claim.method {
-            RpcMethod::GetBlockRecent | RpcMethod::GetBlockArchival => {
+            RpcMethod::GetBlockRecent => {
                 judge_exact_block(client, url, claim.slot, blockhash, blocks).await
             }
             _ => judge_window_block(client, url, claim.slot, blockhash, blocks).await,
@@ -703,32 +930,55 @@ mod tests {
         assert_eq!(sink.queue.lock().unwrap().len(), CLAIM_BUFFER_CAP);
     }
 
-    #[test]
-    fn only_archival_methods_are_archival() {
-        assert!(is_archival(RpcMethod::GetBlockArchival));
-        assert!(is_archival(RpcMethod::GetTransactionArchival));
-        assert!(!is_archival(RpcMethod::GetBlockRecent));
-        assert!(!is_archival(RpcMethod::GetTransactionRecent));
-        assert!(!is_archival(RpcMethod::GetLatestBlockhash));
+    fn obs(
+        rows: &[(&str, Option<&str>, Option<&str>)],
+    ) -> Vec<(String, Option<String>, Option<String>)> {
+        rows.iter()
+            .map(|(n, h, s)| ((*n).to_string(), h.map(str::to_owned), s.map(str::to_owned)))
+            .collect()
     }
 
-    #[tokio::test]
-    async fn archival_claim_skips_when_no_archival_rpc_configured() {
-        let config = ReferenceCheckConfig::default();
-        let client = RpcClient::new(Duration::from_millis(1)).unwrap();
-        let claim = Claim {
-            provider: "helius".into(),
-            method: RpcMethod::GetBlockArchival,
-            slot: 500,
-            payload: Some(blockhash(500, "oldhash")),
-            implausible: false,
-        };
-        let mut blocks = HashMap::new();
-        let mut gpa = HashMap::new();
+    #[test]
+    fn majority_block_picks_agreed_hash_and_a_matching_sig() {
+        let observed = obs(&[
+            ("triton", Some("AAA"), Some("sigA")),
+            ("helius", Some("AAA"), Some("sigA")),
+            ("alchemy", Some("BBB"), Some("sigB")),
+        ]);
         assert_eq!(
-            judge_claim(&client, &config, &claim, &mut blocks, &mut gpa).await,
-            "skipped"
+            majority_block(&observed),
+            Some(("AAA".to_string(), Some("sigA".to_string())))
         );
+    }
+
+    #[test]
+    fn majority_block_needs_a_quorum() {
+        assert_eq!(majority_block(&obs(&[("triton", Some("AAA"), None)])), None);
+        assert_eq!(
+            majority_block(&obs(&[
+                ("triton", Some("AAA"), None),
+                ("helius", Some("BBB"), None),
+                ("alchemy", None, None),
+            ])),
+            None
+        );
+    }
+
+    #[test]
+    fn pick_unused_slot_stays_in_range_and_never_repeats() {
+        let mut used = HashSet::new();
+        let mut seen = Vec::new();
+        for _ in 0..50 {
+            let s = pick_unused_slot(20_000_000, 20_100_000, &mut used).unwrap();
+            assert!((20_000_000..=20_100_000).contains(&s));
+            assert!(!seen.contains(&s), "repeated slot {s}");
+            seen.push(s);
+        }
+        let mut small = HashSet::new();
+        pick_unused_slot(7, 9, &mut small);
+        pick_unused_slot(7, 9, &mut small);
+        pick_unused_slot(7, 9, &mut small);
+        assert!(pick_unused_slot(7, 9, &mut small).is_none());
     }
 
     async fn judge_block_with(
@@ -743,28 +993,11 @@ mod tests {
         }
         let client = RpcClient::new(Duration::from_millis(1)).unwrap();
         match method {
-            RpcMethod::GetBlockRecent | RpcMethod::GetBlockArchival => {
+            RpcMethod::GetBlockRecent => {
                 judge_exact_block(&client, "http://127.0.0.1:1", slot, hash, &mut cache).await
             }
             _ => judge_window_block(&client, "http://127.0.0.1:1", slot, hash, &mut cache).await,
         }
-    }
-
-    #[tokio::test]
-    async fn archival_block_claim_verified_by_exact_slot() {
-        let m = RpcMethod::GetBlockArchival;
-        assert_eq!(
-            judge_block_with(&[(500, NodeBlock::Hash("OLD".into()))], m, 500, "OLD").await,
-            "match"
-        );
-        assert_eq!(
-            judge_block_with(&[(500, NodeBlock::Hash("XXX".into()))], m, 500, "OLD").await,
-            "mismatch"
-        );
-        assert_eq!(
-            judge_block_with(&[(500, NodeBlock::Unavailable)], m, 500, "OLD").await,
-            "skipped"
-        );
     }
 
     #[tokio::test]
