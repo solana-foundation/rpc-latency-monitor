@@ -52,17 +52,24 @@ async fn main() -> anyhow::Result<()> {
         &config.checks,
         client.clone(),
         metrics.clone(),
-        reference,
+        reference.clone(),
         config.max_slot_lag,
         claims,
         config.gpa_targets.clone(),
     );
     reference_check::spawn_reference_check(
         &endpoints,
-        client,
+        client.clone(),
         metrics.clone(),
         config.reference_check.clone(),
         config.claim_checks,
+    );
+    reference_check::spawn_archival_check(
+        &endpoints,
+        client,
+        metrics.clone(),
+        reference,
+        config.archival_interval,
     );
 
     server::serve(config.server.bind, metrics).await
