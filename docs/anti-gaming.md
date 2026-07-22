@@ -48,13 +48,14 @@ predictable and therefore forgeable; the content below is not.
 Every successful probe response yields a *claim* — no extra provider traffic is
 generated. Claims settle for `claim_delay_slots` (default 32) to outlive
 processed-commitment forks, then are verified against the reference node and
-counted in `rpc_claim_check_total{provider, method, result}`.
+counted in `rpc_claim_check_total{provider, method, target, result}` (`target` is
+the gPA probe target name, empty for other methods).
 
 | Method | Claim | Verified against the node | Unforgeable because |
 |---|---|---|---|
 | `getLatestBlockhash` | (slot S, blockhash B) | B must be the blockhash of some block in `[S−8, S]` | a blockhash is a hash over block contents, unknowable before the block exists |
 | `getBlock` (recent) | (slot S, blockhash B) | B must equal the node's blockhash at exactly S | same |
-| `getProgramAccounts`, `getTokenAccountsByOwner` | context slot, account count, 3 sampled (pubkey, data) | samples must exist on the node with the filter's owner and size; count must be within `claim_count_tolerance` (default 8) of the node's own count | real pubkeys cannot be invented; the set size is checkable |
+| `getProgramAccounts`, `getTokenAccountsByOwner` | context slot, account count, 3 sampled (pubkey, data), the probed target | samples must exist on the node and satisfy the target's own filters (program owner, dataSize, memcmp); count must be within `claim_count_tolerance` (default 8) of the node's own count for that target | real pubkeys cannot be invented; the set size is checkable |
 | `getTransaction` (recent), `getSignaturesForAddress` | (signature, slot) | the node must know that signature at that slot | transaction signatures cannot be invented |
 | `getAccountInfo` (clock sysvar) | slot, unix_timestamp | timestamp must be within 2 minutes of wall time | replayed old clock data carries an old timestamp |
 | any slot-bearing method | observed slot | must not exceed the node's time-projected tip by more than `claim_margin` (default 16 slots) | a claim about the future is physically impossible |

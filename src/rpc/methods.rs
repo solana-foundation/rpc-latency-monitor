@@ -2,6 +2,7 @@ use base64::Engine;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
+use crate::config::{GpaTarget, MemcmpFilter};
 use crate::rpc::{AccountSample, ClaimPayload, RequestContext};
 
 const USDC_MINT: &str = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
@@ -89,15 +90,15 @@ impl RpcMethod {
                 let accounts = pick_batch(&ctx.recent_accounts, ctx.tip_slot);
                 json!([accounts, { "encoding": "base64", "commitment": "processed" }])
             }
-            Self::GetProgramAccounts => json!([TOKEN_PROGRAM, {
-                "encoding": "base64",
-                "commitment": "processed",
-                "withContext": true,
-                "filters": [
-                    { "dataSize": TOKEN_ACCOUNT_LEN },
-                    { "memcmp": { "offset": TOKEN_ACCOUNT_OWNER_OFFSET, "bytes": GPA_TOKEN_OWNER } },
-                ],
-            }]),
+            Self::GetProgramAccounts => {
+                let target = ctx.gpa_target.as_ref()?;
+                json!([target.program, {
+                    "encoding": "base64",
+                    "commitment": "processed",
+                    "withContext": true,
+                    "filters": gpa_filters(target),
+                }])
+            }
             Self::GetTokenAccountsByOwner => json!([
                 GPA_TOKEN_OWNER,
                 { "programId": TOKEN_PROGRAM },
@@ -113,7 +114,7 @@ impl RpcMethod {
         Some(params)
     }
 
-    pub fn is_valid_result(self, result: &Value) -> bool {
+    pub fn is_valid_result(self, result: &Value, ctx: &RequestContext) -> bool {
         match self {
             Self::GetHealth => result.as_str() == Some("ok"),
             Self::GetSlot => result.as_u64().is_some_and(|slot| slot > 0),
@@ -122,12 +123,11 @@ impl RpcMethod {
             Self::GetMultipleAccounts => value_of(result)
                 .as_array()
                 .is_some_and(|a| a.iter().any(|entry| !entry.is_null())),
-            Self::GetProgramAccounts | Self::GetTokenAccountsByOwner => {
-                let owner = bs58::decode(GPA_TOKEN_OWNER).into_vec().unwrap_or_default();
-                value_of(result).as_array().is_some_and(|a| {
-                    !a.is_empty() && a.iter().all(|e| gpa_account_matches(e, &owner))
-                })
-            }
+            Self::GetProgramAccounts => match ctx.gpa_target.as_ref() {
+                Some(target) => entries_match(result, target),
+                None => false,
+            },
+            Self::GetTokenAccountsByOwner => entries_match(result, &builtin_token_owner_target()),
             Self::GetBlockRecent | Self::GetBlockArchival => {
                 non_empty_str(result.get("blockhash"))
                     && result
@@ -163,11 +163,16 @@ impl RpcMethod {
                 blockhash: non_empty_string(result.get("blockhash"))?,
             }),
             Self::GetProgramAccounts | Self::GetTokenAccountsByOwner => {
+                let target = match self {
+                    Self::GetProgramAccounts => ctx.gpa_target.clone()?,
+                    _ => builtin_token_owner_target(),
+                };
                 let entries = value_of(result).as_array()?;
                 Some(ClaimPayload::Accounts {
                     slot: self.observed_slot(result),
                     count: entries.len() as u64,
                     sample: sample_accounts(entries),
+                    target,
                 })
             }
             Self::GetTransactionRecent => Some(ClaimPayload::Transaction {
@@ -329,40 +334,92 @@ fn clock_slot_from_value(value: &Value) -> Option<u64> {
     Some(u64::from_le_bytes(slot))
 }
 
-pub fn probe_owner_bytes() -> Vec<u8> {
-    bs58::decode(GPA_TOKEN_OWNER).into_vec().unwrap_or_default()
+pub fn builtin_token_owner_target() -> GpaTarget {
+    GpaTarget {
+        name: "token_owner".to_owned(),
+        program: TOKEN_PROGRAM.to_owned(),
+        data_size: Some(TOKEN_ACCOUNT_LEN),
+        memcmp: vec![MemcmpFilter {
+            offset: TOKEN_ACCOUNT_OWNER_OFFSET,
+            bytes: GPA_TOKEN_OWNER.to_owned(),
+        }],
+    }
 }
 
-pub fn gpa_count_params() -> Value {
-    json!([TOKEN_PROGRAM, {
+pub fn gpa_filters(target: &GpaTarget) -> Vec<Value> {
+    let mut filters = Vec::new();
+    if let Some(size) = target.data_size {
+        filters.push(json!({ "dataSize": size }));
+    }
+    for filter in &target.memcmp {
+        filters.push(json!({ "memcmp": { "offset": filter.offset, "bytes": filter.bytes } }));
+    }
+    filters
+}
+
+pub fn gpa_count_params(target: &GpaTarget) -> Value {
+    json!([target.program, {
         "encoding": "base64",
         "commitment": "confirmed",
         "dataSlice": { "offset": 0, "length": 0 },
-        "filters": [
-            { "dataSize": TOKEN_ACCOUNT_LEN },
-            { "memcmp": { "offset": TOKEN_ACCOUNT_OWNER_OFFSET, "bytes": GPA_TOKEN_OWNER } },
-        ],
+        "filters": gpa_filters(target),
     }])
 }
 
-pub fn gpa_account_matches(entry: &Value, owner: &[u8]) -> bool {
-    let account = entry.get("account").unwrap_or(entry);
-    if account.get("owner").and_then(Value::as_str) != Some(TOKEN_PROGRAM) {
-        return false;
+pub struct GpaMatcher {
+    program: String,
+    data_size: Option<usize>,
+    memcmp: Vec<(usize, Vec<u8>)>,
+}
+
+impl GpaMatcher {
+    pub fn new(target: &GpaTarget) -> Self {
+        Self {
+            program: target.program.clone(),
+            data_size: target.data_size.map(|n| n as usize),
+            memcmp: target
+                .memcmp
+                .iter()
+                .map(|f| {
+                    (
+                        f.offset as usize,
+                        bs58::decode(&f.bytes).into_vec().unwrap_or_default(),
+                    )
+                })
+                .collect(),
+        }
     }
-    let Some(b64) = account
-        .get("data")
-        .and_then(Value::as_array)
-        .and_then(|a| a.first())
-        .and_then(Value::as_str)
-    else {
-        return false;
-    };
-    let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(b64) else {
-        return false;
-    };
-    let off = TOKEN_ACCOUNT_OWNER_OFFSET as usize;
-    bytes.len() == TOKEN_ACCOUNT_LEN as usize && bytes.get(off..off + 32) == Some(owner)
+
+    pub fn matches(&self, entry: &Value) -> bool {
+        let account = entry.get("account").unwrap_or(entry);
+        if account.get("owner").and_then(Value::as_str) != Some(self.program.as_str()) {
+            return false;
+        }
+        let Some(b64) = account
+            .get("data")
+            .and_then(Value::as_array)
+            .and_then(|a| a.first())
+            .and_then(Value::as_str)
+        else {
+            return false;
+        };
+        let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(b64) else {
+            return false;
+        };
+        if self.data_size.is_some_and(|n| bytes.len() != n) {
+            return false;
+        }
+        self.memcmp
+            .iter()
+            .all(|(off, want)| bytes.get(*off..off + want.len()) == Some(want.as_slice()))
+    }
+}
+
+fn entries_match(result: &Value, target: &GpaTarget) -> bool {
+    let matcher = GpaMatcher::new(target);
+    value_of(result)
+        .as_array()
+        .is_some_and(|a| !a.is_empty() && a.iter().all(|e| matcher.matches(e)))
 }
 
 fn value_of(result: &Value) -> &Value {
@@ -424,6 +481,13 @@ mod tests {
         }
     }
 
+    fn gpa_ctx() -> RequestContext {
+        RequestContext {
+            gpa_target: Some(builtin_token_owner_target()),
+            ..RequestContext::default()
+        }
+    }
+
     #[test]
     fn get_slot_builds_processed_commitment_params() {
         let params = RpcMethod::GetSlot
@@ -448,7 +512,7 @@ mod tests {
         data.extend_from_slice(&[0u8; 32]);
         let b64 = base64::engine::general_purpose::STANDARD.encode(&data);
         let result = json!({ "context": { "slot": 999 }, "value": { "data": [b64, "base64"] } });
-        assert!(RpcMethod::GetAccountInfo.is_valid_result(&result));
+        assert!(RpcMethod::GetAccountInfo.is_valid_result(&result, &RequestContext::default()));
         assert_eq!(RpcMethod::GetAccountInfo.observed_slot(&result), Some(slot));
     }
 
@@ -478,8 +542,11 @@ mod tests {
 
     #[test]
     fn gpa_returns_account_data_and_filters_by_owner() {
-        let params = RpcMethod::GetProgramAccounts
+        assert!(RpcMethod::GetProgramAccounts
             .build_params(&RequestContext::default())
+            .is_none());
+        let params = RpcMethod::GetProgramAccounts
+            .build_params(&gpa_ctx())
             .unwrap();
         assert_eq!(params[0], json!(TOKEN_PROGRAM));
         assert!(params[1].get("dataSlice").is_none());
@@ -487,6 +554,40 @@ mod tests {
             params[1]["filters"][0],
             json!({ "dataSize": TOKEN_ACCOUNT_LEN })
         );
+        assert_eq!(
+            params[1]["filters"][1],
+            json!({ "memcmp": { "offset": TOKEN_ACCOUNT_OWNER_OFFSET, "bytes": GPA_TOKEN_OWNER } })
+        );
+    }
+
+    #[test]
+    fn gpa_params_follow_the_configured_target() {
+        let target = GpaTarget {
+            name: "dex_pools".into(),
+            program: VOTE_PROGRAM.into(),
+            data_size: Some(752),
+            memcmp: Vec::new(),
+        };
+        let ctx = RequestContext {
+            gpa_target: Some(target.clone()),
+            ..RequestContext::default()
+        };
+        let params = RpcMethod::GetProgramAccounts.build_params(&ctx).unwrap();
+        assert_eq!(params[0], json!(VOTE_PROGRAM));
+        assert_eq!(params[1]["filters"], json!([{ "dataSize": 752 }]));
+
+        let count_params = gpa_count_params(&target);
+        assert_eq!(count_params[0], json!(VOTE_PROGRAM));
+        assert_eq!(
+            count_params[1]["dataSlice"],
+            json!({ "offset": 0, "length": 0 })
+        );
+
+        let data = base64::engine::general_purpose::STANDARD.encode(vec![0u8; 752]);
+        let entry = json!({ "account": { "owner": VOTE_PROGRAM, "data": [data, "base64"] } });
+        let ok = json!({ "value": [entry] });
+        assert!(RpcMethod::GetProgramAccounts.is_valid_result(&ok, &ctx));
+        assert!(!RpcMethod::GetProgramAccounts.is_valid_result(&ok, &gpa_ctx()));
     }
 
     #[test]
@@ -527,30 +628,33 @@ mod tests {
         data[off..off + 32].copy_from_slice(&owner);
         let good = base64::engine::general_purpose::STANDARD.encode(&data);
         let ok = json!({ "value": [ { "account": { "owner": TOKEN_PROGRAM, "data": [good, "base64"] } } ] });
-        assert!(RpcMethod::GetProgramAccounts.is_valid_result(&ok));
+        assert!(RpcMethod::GetProgramAccounts.is_valid_result(&ok, &gpa_ctx()));
 
         let junk =
             base64::engine::general_purpose::STANDARD.encode(vec![7u8; TOKEN_ACCOUNT_LEN as usize]);
         let bad = json!({ "value": [ { "account": { "owner": TOKEN_PROGRAM, "data": [junk, "base64"] } } ] });
-        assert!(!RpcMethod::GetProgramAccounts.is_valid_result(&bad));
+        assert!(!RpcMethod::GetProgramAccounts.is_valid_result(&bad, &gpa_ctx()));
 
-        assert!(!RpcMethod::GetProgramAccounts.is_valid_result(&json!({ "value": [] })));
+        assert!(!RpcMethod::GetProgramAccounts.is_valid_result(&json!({ "value": [] }), &gpa_ctx()));
     }
 
     #[test]
     fn empty_or_truncated_responses_are_invalid() {
-        assert!(!RpcMethod::GetAccountInfo.is_valid_result(&json!({ "value": null })));
+        let ctx = RequestContext::default();
+        assert!(!RpcMethod::GetAccountInfo.is_valid_result(&json!({ "value": null }), &ctx));
         assert!(!RpcMethod::GetAccountInfo
-            .is_valid_result(&json!({ "value": { "data": ["", "base64"] } })));
-        assert!(!RpcMethod::GetAccountInfo.is_valid_result(&json!({ "context": { "slot": 1 } })));
+            .is_valid_result(&json!({ "value": { "data": ["", "base64"] } }), &ctx));
+        assert!(
+            !RpcMethod::GetAccountInfo.is_valid_result(&json!({ "context": { "slot": 1 } }), &ctx)
+        );
         assert!(!RpcMethod::GetBlockRecent
-            .is_valid_result(&json!({ "blockhash": "abc", "transactions": [] })));
+            .is_valid_result(&json!({ "blockhash": "abc", "transactions": [] }), &ctx));
         assert!(RpcMethod::GetBlockRecent
-            .is_valid_result(&json!({ "blockhash": "abc", "transactions": [{}] })));
-        assert!(!RpcMethod::GetSignaturesForAddress.is_valid_result(&json!([])));
-        assert!(!RpcMethod::GetProgramAccounts.is_valid_result(&json!({ "value": [] })));
-        assert!(RpcMethod::GetHealth.is_valid_result(&json!("ok")));
-        assert!(!RpcMethod::GetHealth.is_valid_result(&json!("behind")));
+            .is_valid_result(&json!({ "blockhash": "abc", "transactions": [{}] }), &ctx));
+        assert!(!RpcMethod::GetSignaturesForAddress.is_valid_result(&json!([]), &ctx));
+        assert!(!RpcMethod::GetProgramAccounts.is_valid_result(&json!({ "value": [] }), &gpa_ctx()));
+        assert!(RpcMethod::GetHealth.is_valid_result(&json!("ok"), &ctx));
+        assert!(!RpcMethod::GetHealth.is_valid_result(&json!("behind"), &ctx));
     }
 
     #[test]
@@ -644,10 +748,11 @@ mod tests {
 
     #[test]
     fn archival_transaction_rejects_a_response_missing_the_transaction() {
-        assert!(!RpcMethod::GetTransactionArchival.is_valid_result(&json!(null)));
-        assert!(!RpcMethod::GetTransactionArchival.is_valid_result(&json!({ "slot": 1 })));
+        let ctx = RequestContext::default();
+        assert!(!RpcMethod::GetTransactionArchival.is_valid_result(&json!(null), &ctx));
+        assert!(!RpcMethod::GetTransactionArchival.is_valid_result(&json!({ "slot": 1 }), &ctx));
         assert!(RpcMethod::GetTransactionArchival
-            .is_valid_result(&json!({ "slot": 1, "transaction": {} })));
+            .is_valid_result(&json!({ "slot": 1, "transaction": {} }), &ctx));
     }
 
     #[test]
@@ -683,10 +788,12 @@ mod tests {
             slot,
             count,
             sample,
-        }) = RpcMethod::GetProgramAccounts.claim_payload(&result, &RequestContext::default())
+            target,
+        }) = RpcMethod::GetProgramAccounts.claim_payload(&result, &gpa_ctx())
         else {
             panic!("expected accounts payload");
         };
+        assert_eq!(target.name, "token_owner");
         assert_eq!(slot, Some(500));
         assert_eq!(count, 10);
         let keys: Vec<&str> = sample.iter().map(|s| s.pubkey.as_str()).collect();

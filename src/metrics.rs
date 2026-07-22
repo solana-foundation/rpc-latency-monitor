@@ -37,7 +37,7 @@ impl Metrics {
         let latency = HistogramVec::new(
             HistogramOpts::new("rpc_latency_seconds", "RPC request round-trip latency")
                 .buckets(LATENCY_BUCKETS.to_vec()),
-            &["provider", "method", "status"],
+            &["provider", "method", "status", "target"],
         )?;
         let slot_lag = IntGaugeVec::new(
             Opts::new(
@@ -48,7 +48,7 @@ impl Metrics {
         )?;
         let requests = IntCounterVec::new(
             Opts::new("rpc_requests_total", "Total RPC requests by outcome"),
-            &["provider", "method", "status", "error_kind"],
+            &["provider", "method", "status", "error_kind", "target"],
         )?;
         let up = IntGaugeVec::new(
             Opts::new("rpc_up", "Whether the provider's last check succeeded"),
@@ -67,7 +67,7 @@ impl Metrics {
                 "rpc_claim_check_total",
                 "Provider (slot, blockhash) claims verified against the reference node, by outcome",
             ),
-            &["provider", "method", "result"],
+            &["provider", "method", "target", "result"],
         )?;
 
         registry.register(Box::new(latency.clone()))?;
@@ -95,9 +95,15 @@ impl Metrics {
         })
     }
 
-    pub fn record_claim_check(&self, provider: &str, method: RpcMethod, result: &str) {
+    pub fn record_claim_check(
+        &self,
+        provider: &str,
+        method: RpcMethod,
+        target: &str,
+        result: &str,
+    ) {
         self.claim_check
-            .with_label_values(&[provider, method.label(), result])
+            .with_label_values(&[provider, method.label(), target, result])
             .inc();
     }
 
@@ -117,16 +123,17 @@ impl Metrics {
         method: RpcMethod,
         result: &CallResult,
         status: CallStatus,
+        target: &str,
     ) {
         let method = method.label();
         let status_label = status.label();
         let error_kind = status.error_kind().unwrap_or("none");
 
         self.latency
-            .with_label_values(&[provider, method, status_label])
+            .with_label_values(&[provider, method, status_label, target])
             .observe(result.latency.as_secs_f64());
         self.requests
-            .with_label_values(&[provider, method, status_label, error_kind])
+            .with_label_values(&[provider, method, status_label, error_kind, target])
             .inc();
         self.up
             .with_label_values(&[provider])
@@ -167,11 +174,18 @@ mod tests {
     #[test]
     fn claim_check_counter_carries_method_and_result() {
         let metrics = Metrics::new("test", "us-east").unwrap();
-        metrics.record_claim_check("helius", RpcMethod::GetLatestBlockhash, "match");
+        metrics.record_claim_check("helius", RpcMethod::GetLatestBlockhash, "", "match");
+        metrics.record_claim_check(
+            "helius",
+            RpcMethod::GetProgramAccounts,
+            "token_owner",
+            "match",
+        );
         let output = metrics.encode().unwrap();
         assert!(output.contains("rpc_claim_check_total"));
         assert!(output.contains("method=\"getLatestBlockhash\""));
         assert!(output.contains("result=\"match\""));
+        assert!(output.contains("target=\"token_owner\""));
     }
 
     #[test]
@@ -182,12 +196,14 @@ mod tests {
             RpcMethod::GetSlot,
             &result(CallStatus::Success),
             CallStatus::Success,
+            "",
         );
         metrics.record_call(
             "triton",
             RpcMethod::GetSlot,
             &result(CallStatus::Error(ErrorKind::Timeout)),
             CallStatus::Error(ErrorKind::Timeout),
+            "",
         );
 
         let output = metrics.encode().unwrap();
@@ -206,6 +222,7 @@ mod tests {
             RpcMethod::GetBlockRecent,
             &result(CallStatus::Skipped),
             CallStatus::Skipped,
+            "",
         );
         let output = metrics.encode().unwrap();
         assert!(output.contains("status=\"skipped\""));
@@ -225,6 +242,7 @@ mod tests {
             RpcMethod::GetSlot,
             &result(CallStatus::Success),
             CallStatus::Success,
+            "",
         );
 
         let output = metrics.encode().unwrap();
