@@ -44,6 +44,10 @@ reference_slot:
 #          data = match, legitimate balance movement = drift
 #        - getTransaction_recent / getSignaturesForAddress: the claimed
 #          (signature, slot) must be known to the node at the same slot
+#        - getBlock_archival / getTransaction_archival: verified the same way
+#          but against `archival_rpc_url` (a trusted archival endpoint) — our
+#          reference node runs a limited ledger and has purged ~40M-slots-ago
+#          history. Left unset (the default) these two verdicts are `skipped`.
 #        - getAccountInfo (clock sysvar): unix_timestamp within 2 minutes of
 #          wall time, else implausible
 #        - any slot-bearing response claiming more than claim_margin slots
@@ -56,6 +60,11 @@ reference_slot:
 # claim_checks: false
 # reference_check:
 #   rpc_url: "http://<reference-node>:8899"
+#   archival_rpc_url: ""       # trusted archival RPC for the two archival
+#                              # methods; ideally NOT one of the measured
+#                              # providers (a provider shouldn't be graded by
+#                              # its own archival tier). Empty = archival
+#                              # verdicts are skipped.
 #   exclude_provider: helius   # don't judge the reference against itself
 #   interval: "5m"
 #   depth: 64                  # checked slot = reference finalized tip - depth

@@ -158,7 +158,7 @@ impl RpcMethod {
                 slot: self.observed_slot(result)?,
                 blockhash: non_empty_string(value_of(result).get("blockhash"))?,
             }),
-            Self::GetBlockRecent => Some(ClaimPayload::Blockhash {
+            Self::GetBlockRecent | Self::GetBlockArchival => Some(ClaimPayload::Blockhash {
                 slot: self.probed_slot(ctx)?,
                 blockhash: non_empty_string(result.get("blockhash"))?,
             }),
@@ -178,6 +178,10 @@ impl RpcMethod {
             Self::GetTransactionRecent => Some(ClaimPayload::Transaction {
                 slot: result.get("slot")?.as_u64()?,
                 signature: ctx.recent_signature.clone()?,
+            }),
+            Self::GetTransactionArchival => Some(ClaimPayload::Transaction {
+                slot: result.get("slot")?.as_u64()?,
+                signature: ctx.archival_signature.clone()?,
             }),
             Self::GetSignaturesForAddress => {
                 let first = result.as_array()?.first()?;
@@ -822,6 +826,31 @@ mod tests {
             Some(ClaimPayload::Transaction {
                 slot: 888,
                 signature: "first".into()
+            })
+        );
+    }
+
+    #[test]
+    fn archival_methods_yield_verifiable_claims() {
+        let ctx = ctx_with_tip(ARCHIVAL_SLOT_DEPTH + 500);
+        let block = json!({ "blockhash": "oldhash", "transactions": [{}] });
+        assert_eq!(
+            RpcMethod::GetBlockArchival.claim_payload(&block, &ctx),
+            Some(ClaimPayload::Blockhash {
+                slot: 500,
+                blockhash: "oldhash".into()
+            })
+        );
+        let ctx = RequestContext {
+            archival_signature: Some("oldsig".into()),
+            ..RequestContext::default()
+        };
+        let tx = json!({ "slot": 42, "transaction": {} });
+        assert_eq!(
+            RpcMethod::GetTransactionArchival.claim_payload(&tx, &ctx),
+            Some(ClaimPayload::Transaction {
+                slot: 42,
+                signature: "oldsig".into()
             })
         );
     }

@@ -37,6 +37,8 @@ pub struct ReferenceCheckConfig {
     #[serde(default)]
     pub rpc_url: String,
     #[serde(default)]
+    pub archival_rpc_url: String,
+    #[serde(default)]
     pub exclude_provider: Option<String>,
     #[serde(with = "humantime_serde", default = "default_reference_interval")]
     pub interval: Duration,
@@ -56,6 +58,7 @@ impl Default for ReferenceCheckConfig {
     fn default() -> Self {
         Self {
             rpc_url: String::new(),
+            archival_rpc_url: String::new(),
             exclude_provider: None,
             interval: default_reference_interval(),
             depth: default_reference_depth(),

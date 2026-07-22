@@ -275,7 +275,7 @@ async fn run_verify_tick(
     for claim in due {
         let result = if claim.implausible {
             "implausible"
-        } else if node_stale {
+        } else if node_stale && !is_archival(claim.method) {
             "skipped"
         } else {
             judge_claim(client, config, &claim, &mut blocks, gpa_counts).await
@@ -286,6 +286,14 @@ async fn run_verify_tick(
         };
         metrics.record_claim_check(&claim.provider, claim.method, target, result);
     }
+}
+
+#[inline]
+fn is_archival(method: RpcMethod) -> bool {
+    matches!(
+        method,
+        RpcMethod::GetBlockArchival | RpcMethod::GetTransactionArchival
+    )
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -302,10 +310,17 @@ async fn judge_claim(
     blocks: &mut HashMap<u64, NodeBlock>,
     gpa_counts: &mut HashMap<String, (u64, Instant)>,
 ) -> &'static str {
-    let url = &config.rpc_url;
+    let url = if is_archival(claim.method) {
+        if config.archival_rpc_url.is_empty() {
+            return "skipped";
+        }
+        &config.archival_rpc_url
+    } else {
+        &config.rpc_url
+    };
     match &claim.payload {
         Some(ClaimPayload::Blockhash { blockhash, .. }) => match claim.method {
-            RpcMethod::GetBlockRecent => {
+            RpcMethod::GetBlockRecent | RpcMethod::GetBlockArchival => {
                 judge_exact_block(client, url, claim.slot, blockhash, blocks).await
             }
             _ => judge_window_block(client, url, claim.slot, blockhash, blocks).await,
@@ -688,6 +703,34 @@ mod tests {
         assert_eq!(sink.queue.lock().unwrap().len(), CLAIM_BUFFER_CAP);
     }
 
+    #[test]
+    fn only_archival_methods_are_archival() {
+        assert!(is_archival(RpcMethod::GetBlockArchival));
+        assert!(is_archival(RpcMethod::GetTransactionArchival));
+        assert!(!is_archival(RpcMethod::GetBlockRecent));
+        assert!(!is_archival(RpcMethod::GetTransactionRecent));
+        assert!(!is_archival(RpcMethod::GetLatestBlockhash));
+    }
+
+    #[tokio::test]
+    async fn archival_claim_skips_when_no_archival_rpc_configured() {
+        let config = ReferenceCheckConfig::default();
+        let client = RpcClient::new(Duration::from_millis(1)).unwrap();
+        let claim = Claim {
+            provider: "helius".into(),
+            method: RpcMethod::GetBlockArchival,
+            slot: 500,
+            payload: Some(blockhash(500, "oldhash")),
+            implausible: false,
+        };
+        let mut blocks = HashMap::new();
+        let mut gpa = HashMap::new();
+        assert_eq!(
+            judge_claim(&client, &config, &claim, &mut blocks, &mut gpa).await,
+            "skipped"
+        );
+    }
+
     async fn judge_block_with(
         map: &[(u64, NodeBlock)],
         method: RpcMethod,
@@ -700,11 +743,28 @@ mod tests {
         }
         let client = RpcClient::new(Duration::from_millis(1)).unwrap();
         match method {
-            RpcMethod::GetBlockRecent => {
+            RpcMethod::GetBlockRecent | RpcMethod::GetBlockArchival => {
                 judge_exact_block(&client, "http://127.0.0.1:1", slot, hash, &mut cache).await
             }
             _ => judge_window_block(&client, "http://127.0.0.1:1", slot, hash, &mut cache).await,
         }
+    }
+
+    #[tokio::test]
+    async fn archival_block_claim_verified_by_exact_slot() {
+        let m = RpcMethod::GetBlockArchival;
+        assert_eq!(
+            judge_block_with(&[(500, NodeBlock::Hash("OLD".into()))], m, 500, "OLD").await,
+            "match"
+        );
+        assert_eq!(
+            judge_block_with(&[(500, NodeBlock::Hash("XXX".into()))], m, 500, "OLD").await,
+            "mismatch"
+        );
+        assert_eq!(
+            judge_block_with(&[(500, NodeBlock::Unavailable)], m, 500, "OLD").await,
+            "skipped"
+        );
     }
 
     #[tokio::test]
