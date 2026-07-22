@@ -24,6 +24,10 @@ pub struct Config {
     pub gpa_targets: Vec<GpaTarget>,
     #[serde(with = "humantime_serde", default = "default_request_timeout")]
     pub request_timeout: Duration,
+    #[serde(with = "humantime_serde", default = "default_archival_interval")]
+    pub archival_interval: Duration,
+    #[serde(with = "humantime_serde", default = "default_archival_timeout")]
+    pub archival_timeout: Duration,
     #[serde(default = "default_max_slot_lag")]
     pub max_slot_lag: u64,
     #[serde(default)]
@@ -36,8 +40,6 @@ pub struct Config {
 pub struct ReferenceCheckConfig {
     #[serde(default)]
     pub rpc_url: String,
-    #[serde(default)]
-    pub archival_rpc_url: String,
     #[serde(default)]
     pub exclude_provider: Option<String>,
     #[serde(with = "humantime_serde", default = "default_reference_interval")]
@@ -58,7 +60,6 @@ impl Default for ReferenceCheckConfig {
     fn default() -> Self {
         Self {
             rpc_url: String::new(),
-            archival_rpc_url: String::new(),
             exclude_provider: None,
             interval: default_reference_interval(),
             depth: default_reference_depth(),
@@ -240,6 +241,14 @@ impl Default for ReferenceSlotConfig {
 
 const fn default_request_timeout() -> Duration {
     Duration::from_secs(10)
+}
+
+const fn default_archival_interval() -> Duration {
+    Duration::from_secs(30)
+}
+
+const fn default_archival_timeout() -> Duration {
+    Duration::from_secs(30)
 }
 
 const fn default_max_slot_lag() -> u64 {

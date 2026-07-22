@@ -156,7 +156,7 @@ to either the config value or the raw JSON-RPC name:
 | `get_program_accounts` | `getProgramAccounts` | `getProgramAccounts` | Rotates round-robin through the configured `gpa_targets` (real heavy query shapes: owner scans, stake-by-authority, pool enumeration by `dataSize`, holders-by-mint), **returning real account data** (no zero-length `dataSlice`). Metrics carry a `target` label with the target's name. |
 | `get_token_accounts_by_owner` | `getTokenAccountsByOwner` | `getTokenAccountsByOwner` | All token accounts for an owner with a large, stable set. |
 | `get_block_recent` | `getBlock` | `getBlock_recent` | A recent block a fixed depth behind the tip, **`transactionDetails: full`** (a real block fetch); also seeds the live account pool. |
-| `get_block_archival` | `getBlock` | `getBlock_archival` | A full block ~40M slots back, retained only by archival nodes (non-archival tiers correctly error). Longer per-check `timeout` (30s) for cold-storage retrieval. |
+| `get_block_archival` | `getBlock` | `getBlock_archival` | A full block ~40M slots back, retained only by archival nodes (non-archival tiers correctly error). Driven by the coordinated archival round (below), not a per-provider loop: every provider is asked the **same random, never-repeated** old slot so latency is comparable and blockhashes can be cross-checked. |
 | `get_transaction_recent` | `getTransaction` | `getTransaction_recent` | A signature freshly discovered by `get_signatures_for_address`. |
 | `get_signatures_for_address` | `getSignaturesForAddress` | `getSignaturesForAddress` | A permanently busy address at `confirmed`, `limit` 1000 (a full page, not just the head). |
 
@@ -281,11 +281,13 @@ The measurements are designed to be neutral and reproducible:
 - **Content verification.** Provider responses are verified after the fact against the reference
   node — blockhashes, account existence and counts, transaction slots, clock timestamps — so data
   stamped with a fresh slot must actually be fresh. Archival responses (`getBlock`/`getTransaction`
-  ~40M slots back) are checked against a trusted archival RPC (`archival_rpc_url`) instead, since the
-  reference node runs a limited ledger; the target slot moves each round so a canned answer can't fake
-  the deep read. See [`docs/anti-gaming.md`](./docs/anti-gaming.md) for the full design — including why
-  a dedicated reference node is used rather than cross-provider consensus, and how delayed-but-honest
-  data is kept distinct from fabrication.
+  ~40M slots back) can't use the reference node (it runs a limited ledger); instead a coordinated
+  round asks every provider the same **random, never-repeated** old slot and cross-checks their
+  blockhashes against each other (majority = truth, outlier = mismatch) — no external endpoint, and
+  a moving slot can't be pre-seeded. See [`docs/anti-gaming.md`](./docs/anti-gaming.md) for the full
+  design — including why a dedicated reference node is used for recent data (rather than cross-provider
+  consensus, which only works for immutable archival), and how delayed-but-honest data is kept distinct
+  from fabrication.
 - **gPA index (note).** The `get_program_accounts` check is a deliberately heavy query. It rotates
   through a curated, config-driven list of real query shapes (`gpa_targets`) rather than a single
   hard-coded filter, so providers can't special-case one query — while staying static enough that

@@ -34,10 +34,13 @@ don't, for two reasons that a majority vote cannot fix:
 
 The **one exception is archival data**, which is immutable and old: every honest
 provider must return the byte-identical blockhash for a given ancient slot, with no
-timing skew and no poisoning subtlety. There, an independent source suffices — but
-our reference node runs a limited ledger and has purged that history, so archival
-claims are checked against a separate trusted archival RPC (`archival_rpc_url`)
-rather than the node. See the archival row below.
+timing skew and no poisoning subtlety. There, cross-provider agreement is enough on
+its own — and it is what we use, precisely because the two problems above don't
+apply. Our reference node can't help here anyway (it runs a limited ledger and has
+purged ~40M-slots-ago history), and designating one provider's archival tier as
+truth would let a competitor grade its rivals and never be checked itself. So
+archival is verified by matching the providers against each other. See the archival
+round below.
 
 ## Layer 0 — response validation (always on)
 
@@ -74,26 +77,41 @@ predictable and therefore forgeable; the content below is not.
 
 Every successful probe response yields a *claim* — no extra provider traffic is
 generated. Claims settle for `claim_delay_slots` (default 32) to outlive
-processed-commitment forks, then are verified against the reference node (archival
-methods against `archival_rpc_url`) and counted in
-`rpc_claim_check_total{provider, method, target, result}` (`target` is the gPA
-probe target name, empty for other methods).
+processed-commitment forks, then are verified against the reference node and
+counted in `rpc_claim_check_total{provider, method, target, result}` (`target` is
+the gPA probe target name, empty for other methods).
 
-| Method | Claim | Verified against | Unforgeable because |
+| Method | Claim | Verified against the node | Unforgeable because |
 |---|---|---|---|
-| `getLatestBlockhash` | (slot S, blockhash B) | node: B must be the blockhash of some block in `[S−8, S]` | a blockhash is a hash over block contents, unknowable before the block exists |
-| `getBlock` (recent) | (slot S, blockhash B) | node: B must equal the node's blockhash at exactly S | same |
-| `getProgramAccounts`, `getTokenAccountsByOwner` | context slot, account count, 3 sampled (pubkey, data), the probed target | node: samples must exist and satisfy the target's own filters (program owner, dataSize, memcmp); count within `claim_count_tolerance` (default 8) of the node's own count for that target | real pubkeys cannot be invented; the set size is checkable |
-| `getTransaction` (recent), `getSignaturesForAddress` | (signature, slot) | node: the node must know that signature at that slot | transaction signatures cannot be invented |
-| `getBlock` (archival), `getTransaction` (archival) | (slot S, blockhash B) / (signature, slot) | **archival RPC**: B must equal the archival endpoint's blockhash at exactly S / the signature must be known there at that slot | archival data is immutable, so a moving target the provider can't predict has one correct answer that a fixed lookup table can't fake |
-| `getAccountInfo` (clock sysvar) | slot, unix_timestamp | node: timestamp must be within 2 minutes of wall time | replayed old clock data carries an old timestamp |
-| any slot-bearing method | observed slot | node: must not exceed the node's time-projected tip by more than `claim_margin` (default 16 slots) | a claim about the future is physically impossible |
+| `getLatestBlockhash` | (slot S, blockhash B) | B must be the blockhash of some block in `[S−8, S]` | a blockhash is a hash over block contents, unknowable before the block exists |
+| `getBlock` (recent) | (slot S, blockhash B) | B must equal the node's blockhash at exactly S | same |
+| `getProgramAccounts`, `getTokenAccountsByOwner` | context slot, account count, 3 sampled (pubkey, data), the probed target | samples must exist on the node and satisfy the target's own filters (program owner, dataSize, memcmp); count within `claim_count_tolerance` (default 8) of the node's own count for that target | real pubkeys cannot be invented; the set size is checkable |
+| `getTransaction` (recent), `getSignaturesForAddress` | (signature, slot) | the node must know that signature at that slot | transaction signatures cannot be invented |
+| `getAccountInfo` (clock sysvar) | slot, unix_timestamp | timestamp must be within 2 minutes of wall time | replayed old clock data carries an old timestamp |
+| any slot-bearing method | observed slot | must not exceed the node's time-projected tip by more than `claim_margin` (default 16 slots) | a claim about the future is physically impossible |
 
-The archival slot is a moving target (a fixed offset below the live tip), so a
-provider cannot pre-seed a canned `slot → blockhash` answer and skip the actual
-deep read: it can't predict which ancient slot the next round will ask for. That is
-why archival verification needs a real source of truth rather than a hardcoded
-known-good value — a fixed anchor would be trivially precomputable.
+### The archival round (cross-provider, no reference node)
+
+`getBlock_archival` and `getTransaction_archival` reach ~40M slots back — history
+the reference node has purged — so they are not claim-verified against it. Instead
+a coordinated round runs every `archival_interval` (default 30s):
+
+1. Pick **one random slot** from a deep range (`≥ tip − 40M`) that has **never been
+   used before** — kept in an in-process set so no slot is queried twice.
+2. Query **every provider** for that exact slot's block (timed, so archival latency
+   is still measured), and take the **majority blockhash** across them as truth
+   (quorum ≥ 2).
+3. A provider whose blockhash matches the majority is `match`; a *different*
+   blockhash is `mismatch`; no block returned is `skipped` (it may simply not retain
+   that depth — never penalized). A signature from the truth block is then looked up
+   on each provider and its slot cross-checked the same way.
+
+Because the slot is **random and never repeated**, a provider cannot pre-seed a
+canned `slot → blockhash` answer and skip the actual deep read — it can't predict
+which ancient slot the next round asks for. And because archival data is immutable,
+cross-provider agreement is unambiguous truth (no timing skew, no fork), so no
+external archival endpoint is needed and no single provider grades the others.
+Results land in the same `rpc_claim_check_total{provider, method, result}` counter.
 
 ### Verdicts
 
@@ -109,9 +127,9 @@ known-good value — a fixed anchor would be trivially precomputable.
 - `missing` — the claimed content should exist but no block/transaction was found.
 - `implausible` — the claim was ahead of physics (future slot, wrong wall clock).
 - `skipped` — *we* couldn't verify (reference node unreachable, block unavailable,
-  node stale, or — for archival methods — no `archival_rpc_url` configured or the
-  archival endpoint didn't answer). Never counted against a provider. Archival
-  verdicts are *not* gated on our node's staleness, since they don't consult it.
+  node stale; or, for the archival round, the provider returned no block for the
+  slot — it may not retain that depth, or the slot was skipped and no quorum
+  formed). Never counted against a provider.
 
 ## What if the data is delayed, not dishonest?
 
