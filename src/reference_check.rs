@@ -4,6 +4,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use rand::RngExt;
 use serde_json::{json, Value};
+use tokio::task::JoinSet;
 use tokio::time::sleep;
 
 use crate::config::{GpaTarget, ReferenceCheckConfig};
@@ -19,6 +20,7 @@ const ARCHIVAL_MIN_DEPTH: u64 = 40_000_000;
 const ARCHIVAL_FLOOR: u64 = 20_000_000;
 const ARCHIVAL_SLOT_PICK_TRIES: u32 = 32;
 const ARCHIVAL_MIN_QUORUM: usize = 2;
+const ARCHIVAL_USED_CAP: usize = 200_000;
 
 const LATEST_BLOCKHASH_WINDOW: u64 = 8;
 const CLAIM_BUFFER_CAP: usize = 1024;
@@ -117,7 +119,7 @@ pub fn spawn_archival_check(
         return;
     }
     tokio::spawn(async move {
-        let mut used: HashSet<u64> = HashSet::new();
+        let mut used = UsedSlots::default();
         loop {
             sleep(interval).await;
             run_archival_round(&client, &providers, &metrics, &reference, &mut used).await;
@@ -126,11 +128,11 @@ pub fn spawn_archival_check(
 }
 
 async fn run_archival_round(
-    client: &RpcClient,
+    client: &Arc<RpcClient>,
     providers: &[ProviderEndpoint],
     metrics: &Metrics,
     reference: &ReferenceSlot,
-    used: &mut HashSet<u64>,
+    used: &mut UsedSlots,
 ) {
     let Some(tip) = reference.current() else {
         return;
@@ -145,18 +147,24 @@ async fn run_archival_round(
         return;
     };
 
-    let mut observed: Vec<(String, Option<String>, Option<String>)> = Vec::new();
+    let mut block_set = JoinSet::new();
     for provider in providers {
-        let (result, hash, sig) = timed_archival_block(client, &provider.url, slot).await;
+        let client = client.clone();
+        let name = provider.name.clone();
+        let url = provider.url.clone();
+        block_set.spawn(async move {
+            let (result, hash, sig) = timed_archival_block(&client, &url, slot).await;
+            (name, result, hash, sig)
+        });
+    }
+    let mut observed: Vec<(String, Option<String>, Option<String>)> = Vec::new();
+    while let Some(joined) = block_set.join_next().await {
+        let Ok((name, result, hash, sig)) = joined else {
+            continue;
+        };
         let status = result.status;
-        metrics.record_call(
-            &provider.name,
-            RpcMethod::GetBlockArchival,
-            &result,
-            status,
-            "",
-        );
-        observed.push((provider.name.clone(), hash, sig));
+        metrics.record_call(&name, RpcMethod::GetBlockArchival, &result, status, "");
+        observed.push((name, hash, sig));
     }
 
     let Some((truth, truth_sig)) = majority_block(&observed) else {
@@ -174,11 +182,24 @@ async fn run_archival_round(
     let Some(sig) = truth_sig else {
         return;
     };
+    let mut tx_set = JoinSet::new();
     for provider in providers {
-        let (result, tx_slot) = timed_archival_tx(client, &provider.url, &sig).await;
+        let client = client.clone();
+        let name = provider.name.clone();
+        let url = provider.url.clone();
+        let sig = sig.clone();
+        tx_set.spawn(async move {
+            let (result, tx_slot) = timed_archival_tx(&client, &url, &sig).await;
+            (name, result, tx_slot)
+        });
+    }
+    while let Some(joined) = tx_set.join_next().await {
+        let Ok((name, result, tx_slot)) = joined else {
+            continue;
+        };
         let status = result.status;
         metrics.record_call(
-            &provider.name,
+            &name,
             RpcMethod::GetTransactionArchival,
             &result,
             status,
@@ -189,16 +210,32 @@ async fn run_archival_round(
             Some(_) => "mismatch",
             None => "skipped",
         };
-        metrics.record_claim_check(
-            &provider.name,
-            RpcMethod::GetTransactionArchival,
-            "",
-            verdict,
-        );
+        metrics.record_claim_check(&name, RpcMethod::GetTransactionArchival, "", verdict);
     }
 }
 
-fn pick_unused_slot(floor: u64, ceil: u64, used: &mut HashSet<u64>) -> Option<u64> {
+#[derive(Default)]
+struct UsedSlots {
+    set: HashSet<u64>,
+    order: VecDeque<u64>,
+}
+
+impl UsedSlots {
+    fn insert(&mut self, slot: u64) -> bool {
+        if !self.set.insert(slot) {
+            return false;
+        }
+        self.order.push_back(slot);
+        if self.order.len() > ARCHIVAL_USED_CAP {
+            if let Some(evicted) = self.order.pop_front() {
+                self.set.remove(&evicted);
+            }
+        }
+        true
+    }
+}
+
+fn pick_unused_slot(floor: u64, ceil: u64, used: &mut UsedSlots) -> Option<u64> {
     let mut rng = rand::rng();
     for _ in 0..ARCHIVAL_SLOT_PICK_TRIES {
         let slot = rng.random_range(floor..=ceil);
@@ -315,10 +352,9 @@ async fn timed_archival_tx(
     let resp = client.raw_call_checked(url, "getTransaction", params).await;
     let latency = start.elapsed();
     match resp {
-        RawResponse::Result(value) if value.is_null() => (
-            archival_result(latency, CallStatus::Error(ErrorKind::Empty)),
-            None,
-        ),
+        RawResponse::Result(value) if value.is_null() => {
+            (archival_result(latency, CallStatus::Skipped), None)
+        }
         RawResponse::Result(value) => {
             let tx_slot = value.get("slot").and_then(Value::as_u64);
             let status = if tx_slot.is_some() {
@@ -966,7 +1002,7 @@ mod tests {
 
     #[test]
     fn pick_unused_slot_stays_in_range_and_never_repeats() {
-        let mut used = HashSet::new();
+        let mut used = UsedSlots::default();
         let mut seen = Vec::new();
         for _ in 0..50 {
             let s = pick_unused_slot(20_000_000, 20_100_000, &mut used).unwrap();
@@ -974,11 +1010,22 @@ mod tests {
             assert!(!seen.contains(&s), "repeated slot {s}");
             seen.push(s);
         }
-        let mut small = HashSet::new();
+        let mut small = UsedSlots::default();
         pick_unused_slot(7, 9, &mut small);
         pick_unused_slot(7, 9, &mut small);
         pick_unused_slot(7, 9, &mut small);
         assert!(pick_unused_slot(7, 9, &mut small).is_none());
+    }
+
+    #[test]
+    fn used_slots_evicts_oldest_past_the_cap() {
+        let mut used = UsedSlots::default();
+        for s in 0..(ARCHIVAL_USED_CAP as u64 + 10) {
+            assert!(used.insert(s));
+        }
+        assert_eq!(used.set.len(), ARCHIVAL_USED_CAP);
+        assert!(!used.set.contains(&0));
+        assert!(used.set.contains(&(ARCHIVAL_USED_CAP as u64 + 9)));
     }
 
     async fn judge_block_with(

@@ -26,6 +26,8 @@ pub struct Config {
     pub request_timeout: Duration,
     #[serde(with = "humantime_serde", default = "default_archival_interval")]
     pub archival_interval: Duration,
+    #[serde(with = "humantime_serde", default = "default_archival_timeout")]
+    pub archival_timeout: Duration,
     #[serde(default = "default_max_slot_lag")]
     pub max_slot_lag: u64,
     #[serde(default)]
@@ -242,6 +244,10 @@ const fn default_request_timeout() -> Duration {
 }
 
 const fn default_archival_interval() -> Duration {
+    Duration::from_secs(30)
+}
+
+const fn default_archival_timeout() -> Duration {
     Duration::from_secs(30)
 }
 
