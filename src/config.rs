@@ -22,6 +22,8 @@ pub struct Config {
     pub checks: Vec<CheckConfig>,
     #[serde(default = "default_gpa_targets")]
     pub gpa_targets: Vec<GpaTarget>,
+    #[serde(default)]
+    pub gpa_derive: Option<GpaDeriveConfig>,
     #[serde(with = "humantime_serde", default = "default_request_timeout")]
     pub request_timeout: Duration,
     #[serde(with = "humantime_serde", default = "default_archival_interval")]
@@ -138,6 +140,31 @@ pub struct MemcmpFilter {
     pub bytes: String,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+pub struct GpaDeriveConfig {
+    pub endpoint: String,
+    #[serde(with = "humantime_serde", default = "default_gpa_derive_interval")]
+    pub interval: Duration,
+    #[serde(default = "default_gpa_derive_min_accounts")]
+    pub min_accounts: u64,
+    #[serde(default = "default_gpa_derive_max_accounts")]
+    pub max_accounts: u64,
+}
+
+const fn default_gpa_derive_interval() -> Duration {
+    Duration::from_secs(300)
+}
+
+const fn default_gpa_derive_min_accounts() -> u64 {
+    5
+}
+
+const fn default_gpa_derive_max_accounts() -> u64 {
+    200
+}
+
+pub const DERIVED_TARGET_PREFIX: &str = "derived_";
+
 fn default_gpa_targets() -> Vec<GpaTarget> {
     vec![methods::builtin_token_owner_target()]
 }
@@ -190,10 +217,24 @@ impl Config {
         {
             bail!("config: get_program_accounts check requires at least one gpa_target");
         }
+        if let Some(derive) = &self.gpa_derive {
+            if derive.endpoint.is_empty() {
+                bail!("config: gpa_derive requires an endpoint");
+            }
+            if derive.min_accounts == 0 || derive.min_accounts > derive.max_accounts {
+                bail!("config: gpa_derive needs 1 <= min_accounts <= max_accounts");
+            }
+        }
         let mut names = HashSet::with_capacity(self.gpa_targets.len());
         for target in &self.gpa_targets {
             if !names.insert(target.name.as_str()) {
                 bail!("config: duplicate gpa_target name '{}'", target.name);
+            }
+            if target.name.starts_with(DERIVED_TARGET_PREFIX) {
+                bail!(
+                    "config: gpa_target name '{}' uses the reserved '{DERIVED_TARGET_PREFIX}' prefix",
+                    target.name
+                );
             }
             if target.data_size.is_none() && target.memcmp.is_empty() {
                 bail!(
@@ -367,6 +408,52 @@ mod tests {
              \x20 - {{ name: owner, program: TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA, memcmp: [{{ offset: 32, bytes: 9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM }}] }}\n"
         ));
         assert!(good.validate().is_ok());
+    }
+
+    #[test]
+    fn gpa_derive_is_parsed_and_validated() {
+        let base = "region: x\n\
+             server: { bind: \"0.0.0.0:9464\" }\n\
+             providers: [{ name: a, url: \"http://a\" }]\n\
+             checks: [{ method: get_program_accounts, interval: 2s }]\n";
+
+        let defaults = parse(&format!(
+            "{base}gpa_derive: {{ endpoint: \"http://node\" }}\n"
+        ));
+        assert!(defaults.validate().is_ok());
+        let derive = defaults.gpa_derive.unwrap();
+        assert_eq!(derive.interval, Duration::from_secs(300));
+        assert_eq!(derive.min_accounts, 5);
+        assert_eq!(derive.max_accounts, 200);
+
+        let absent = parse(base);
+        assert!(absent.gpa_derive.is_none());
+        assert!(absent.validate().is_ok());
+
+        let no_endpoint = parse(&format!("{base}gpa_derive: {{ endpoint: \"\" }}\n"));
+        assert!(no_endpoint.validate().is_err());
+
+        let bad_bounds = parse(&format!(
+            "{base}gpa_derive: {{ endpoint: \"http://node\", min_accounts: 50, max_accounts: 10 }}\n"
+        ));
+        assert!(bad_bounds.validate().is_err());
+    }
+
+    #[test]
+    fn config_targets_cannot_use_the_derived_prefix() {
+        let config = parse(
+            "region: x\n\
+             server: { bind: \"0.0.0.0:9464\" }\n\
+             providers: [{ name: a, url: \"http://a\" }]\n\
+             checks: [{ method: get_program_accounts, interval: 2s }]\n\
+             gpa_targets:\n\
+             \x20 - { name: derived_token_by_mint, program: TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA, data_size: 165 }\n",
+        );
+        assert!(config
+            .validate()
+            .unwrap_err()
+            .to_string()
+            .contains("reserved"));
     }
 
     #[test]

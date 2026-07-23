@@ -93,6 +93,24 @@ gpa_targets:
     program: Vote111111111111111111111111111111111111111
     data_size: 3762
 
+# Optional: derive additional, rotating gPA targets from live chain data so
+# providers can't special-case a fixed query. Every `interval`, token accounts
+# observed in recent blocks are unpacked into two memcmp anchors — the mint
+# (holders-by-mint, offset 0) and the owner (accounts-by-owner, offset 32) —
+# and each candidate is accepted only if a count-only preflight (zero-length
+# dataSlice) against `endpoint` returns between min_accounts and max_accounts
+# matches, keeping result sizes bounded and comparable. Accepted targets join
+# the gpa_targets rotation under the reserved names derived_token_by_mint /
+# derived_token_by_owner (constant metric labels; the anchor rotates
+# underneath). Point `endpoint` at the reference node or another
+# non-benchmarked RPC — providers never see the preflight. Omit the whole
+# block to disable derivation.
+# gpa_derive:
+#   endpoint: "http://<reference-node>:8899"
+#   interval: "5m"
+#   min_accounts: 5     # floor: a closing account can't empty the result set
+#   max_accounts: 200   # cap: bounded result sizes, comparable latency
+
 # RPC providers to benchmark. `url` may contain a ${ENV_VAR} placeholder; the
 # whole api-key/url secret is supplied via the environment.
 providers:

@@ -56,6 +56,7 @@ async fn main() -> anyhow::Result<()> {
         config.max_slot_lag,
         claims,
         config.gpa_targets.clone(),
+        config.gpa_derive.clone(),
     );
     reference_check::spawn_reference_check(
         &endpoints,
