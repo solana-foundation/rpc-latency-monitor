@@ -4,7 +4,8 @@ use std::time::Duration;
 use rand::RngExt;
 use tokio::time::sleep;
 
-use crate::config::{CheckConfig, GpaTarget};
+use crate::config::{CheckConfig, GpaDeriveConfig, GpaTarget};
+use crate::gpa_derive::{self, DerivedTargets};
 use crate::metrics::Metrics;
 use crate::providers::ProviderEndpoint;
 use crate::reference_check::ClaimSink;
@@ -22,9 +23,19 @@ pub fn spawn_checks(
     max_slot_lag: u64,
     claims: Option<ClaimSink>,
     gpa_targets: Vec<GpaTarget>,
+    gpa_derive: Option<GpaDeriveConfig>,
 ) {
     let shared = SharedState::default();
     let gpa_targets = Arc::new(gpa_targets);
+    let derived_gpa = DerivedTargets::default();
+    if let Some(config) = gpa_derive {
+        tokio::spawn(gpa_derive::run(
+            client.clone(),
+            config,
+            shared.recent_accounts.clone(),
+            derived_gpa.clone(),
+        ));
+    }
     for endpoint in endpoints {
         for check in checks {
             if matches!(
@@ -44,6 +55,7 @@ pub fn spawn_checks(
                 max_slot_lag,
                 claims: claims.clone(),
                 gpa_targets: gpa_targets.clone(),
+                derived_gpa: derived_gpa.clone(),
             };
             tokio::spawn(task.run());
         }
@@ -61,13 +73,19 @@ struct CheckTask {
     max_slot_lag: u64,
     claims: Option<ClaimSink>,
     gpa_targets: Arc<Vec<GpaTarget>>,
+    derived_gpa: DerivedTargets,
 }
 
 impl CheckTask {
     async fn run(self) {
         let mut rotation = 0usize;
         loop {
-            let gpa_target = rotated_target(&self.gpa_targets, self.check.method, rotation);
+            let gpa_target = rotated_target(
+                &self.gpa_targets,
+                &self.derived_gpa.current(),
+                self.check.method,
+                rotation,
+            );
             rotation = rotation.wrapping_add(1);
             let ctx = RequestContext {
                 tip_slot: self.reference.current(),
@@ -185,11 +203,25 @@ fn stale_by_lag(tip: Option<u64>, observed: Option<u64>, max_lag: u64) -> bool {
     matches!((tip, observed), (Some(t), Some(s)) if t.saturating_sub(s) > max_lag)
 }
 
-fn rotated_target(targets: &[GpaTarget], method: RpcMethod, rotation: usize) -> Option<GpaTarget> {
-    if method != RpcMethod::GetProgramAccounts || targets.is_empty() {
+fn rotated_target(
+    targets: &[GpaTarget],
+    derived: &[GpaTarget],
+    method: RpcMethod,
+    rotation: usize,
+) -> Option<GpaTarget> {
+    if method != RpcMethod::GetProgramAccounts {
         return None;
     }
-    Some(targets[rotation % targets.len()].clone())
+    let total = targets.len() + derived.len();
+    if total == 0 {
+        return None;
+    }
+    let index = rotation % total;
+    Some(if index < targets.len() {
+        targets[index].clone()
+    } else {
+        derived[index - targets.len()].clone()
+    })
 }
 
 #[cfg(test)]
@@ -206,9 +238,8 @@ mod tests {
         assert!(!stale_by_lag(Some(500), Some(900), 150));
     }
 
-    #[test]
-    fn gpa_targets_rotate_round_robin_only_for_gpa() {
-        let targets: Vec<GpaTarget> = ["a", "b", "c"]
+    fn named_targets(names: &[&str]) -> Vec<GpaTarget> {
+        names
             .iter()
             .map(|n| GpaTarget {
                 name: (*n).to_owned(),
@@ -216,17 +247,45 @@ mod tests {
                 data_size: Some(1),
                 memcmp: Vec::new(),
             })
-            .collect();
+            .collect()
+    }
+
+    #[test]
+    fn gpa_targets_rotate_round_robin_only_for_gpa() {
+        let targets = named_targets(&["a", "b", "c"]);
         let picked: Vec<String> = (0..4)
             .map(|i| {
-                rotated_target(&targets, RpcMethod::GetProgramAccounts, i)
+                rotated_target(&targets, &[], RpcMethod::GetProgramAccounts, i)
                     .unwrap()
                     .name
             })
             .collect();
         assert_eq!(picked, vec!["a", "b", "c", "a"]);
-        assert!(rotated_target(&targets, RpcMethod::GetSlot, 0).is_none());
-        assert!(rotated_target(&[], RpcMethod::GetProgramAccounts, 0).is_none());
+        assert!(rotated_target(&targets, &[], RpcMethod::GetSlot, 0).is_none());
+        assert!(rotated_target(&[], &[], RpcMethod::GetProgramAccounts, 0).is_none());
+    }
+
+    #[test]
+    fn derived_targets_join_the_rotation_after_configured_ones() {
+        let targets = named_targets(&["a"]);
+        let derived = named_targets(&["derived_x", "derived_y"]);
+        let picked: Vec<String> = (0..4)
+            .map(|i| {
+                rotated_target(&targets, &derived, RpcMethod::GetProgramAccounts, i)
+                    .unwrap()
+                    .name
+            })
+            .collect();
+        assert_eq!(picked, vec!["a", "derived_x", "derived_y", "a"]);
+
+        let only_derived: Vec<String> = (0..2)
+            .map(|i| {
+                rotated_target(&[], &derived, RpcMethod::GetProgramAccounts, i)
+                    .unwrap()
+                    .name
+            })
+            .collect();
+        assert_eq!(only_derived, vec!["derived_x", "derived_y"]);
     }
 
     #[test]

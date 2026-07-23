@@ -1,5 +1,6 @@
 pub mod config;
 pub mod geo;
+pub mod gpa_derive;
 pub mod metrics;
 pub mod providers;
 pub mod reference_check;

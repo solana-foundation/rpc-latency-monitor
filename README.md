@@ -291,10 +291,14 @@ The measurements are designed to be neutral and reproducible:
 - **gPA index (note).** The `get_program_accounts` check is a deliberately heavy query. It rotates
   through a curated, config-driven list of real query shapes (`gpa_targets`) rather than a single
   hard-coded filter, so providers can't special-case one query — while staying static enough that
-  results are comparable across providers and verifiable against the reference node. It is the most
-  demanding read in the suite and is tracked as its own signal (per `target`) of how providers handle
-  expensive index-style requests; it is weighted separately from the lightweight checks rather than
-  averaged into them.
+  results are comparable across providers and verifiable against the reference node. Optionally
+  (`gpa_derive`), fresh memcmp-scoped targets are also derived from live chain data on an interval:
+  mint and owner anchors harvested from recently observed token accounts, size-bounded by a
+  count-only preflight against the reference node, joining the rotation as
+  `derived_token_by_mint` / `derived_token_by_owner` — so even the query shapes rotate
+  unpredictably. It is the most demanding read in the suite and is tracked as its own signal (per
+  `target`) of how providers handle expensive index-style requests; it is weighted separately from
+  the lightweight checks rather than averaged into them.
 
 Outcomes are classified precisely — see [`docs/error-kinds.md`](./docs/error-kinds.md) for the full
 label taxonomy — so a slow-but-correct provider is never conflated with a fast-but-failing (or

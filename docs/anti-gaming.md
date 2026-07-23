@@ -12,6 +12,18 @@ supplies only (a) an unpoisonable view of the chain tip and (b) ground truth for
 after-the-fact content checks. Both are location-invariant, which is why one node
 serves every vantage point.
 
+## The threat model at a glance
+
+| What a provider might try | What stops it | Layer |
+|---|---|---|
+| Answer fast with empty, null, or truncated payloads | response validation — empty can't win | 0 |
+| Serve cached or precomputed answers to known queries | every target moves: rotating accounts, fresh signatures, sliding block slots | 3 |
+| Special-case the one heavy gPA query it knows we send | curated target rotation, plus derived targets whose memcmp anchors change every interval | 3 |
+| Stamp a far-future slot to poison the tip and make honest rivals look stale | tip anchored on the reference node; providers can raise it, never lower it | 1 |
+| Stamp fresh slot numbers on stale or fabricated content | claim verification: blockhashes, pubkeys, signatures, clock timestamps checked against the node after settling | 2 |
+| Pre-seed a canned answer for the archival probe | one random, never-repeated deep slot per round; majority blockhash across providers is truth | archival |
+| Recognize benchmark traffic and route it to premium hardware | **not prevented** — see [Known limits](#known-limits) | — |
+
 ### Why a dedicated reference node, and not the providers themselves?
 
 The obvious cheaper alternative is to cross-check providers against each other —
@@ -131,6 +143,62 @@ Results land in the same `rpc_claim_check_total{provider, method, result}` count
   slot — it may not retain that depth, or the slot was skipped and no quorum
   formed). Never counted against a provider.
 
+## Layer 3 — unpredictable targets (always on; derivation opt-in)
+
+Layers 0–2 catch a lie after it is told. This layer removes the ability to prepare
+the lie — or the cache — in advance, by making the *question* unpredictable. A
+provider can only look good on these probes by being fast at real, unprepared work.
+
+Always on, per method:
+
+- **Account reads** (`getAccountInfo` batch pool, `getMultipleAccounts`) rotate
+  over real accounts observed in recent blocks; the batch is re-drawn each cycle
+  (anchored by one permanent account so a since-closed ephemeral account can't
+  register as a provider failure).
+- **`getBlock_recent`** probes a moving slot a fixed depth behind the live tip.
+- **`getTransaction_recent`** chases a signature freshly surfaced by
+  `getSignaturesForAddress` — it did not exist minutes earlier.
+- **Archival probes** use a random, never-repeated slot (see the archival round).
+- **Every request** carries `Cache-Control: no-cache` / `Pragma: no-cache`.
+
+For `getProgramAccounts` there are two tiers:
+
+1. **Curated targets** (`gpa_targets`): a static, config-driven list of real heavy
+   query shapes. Static on purpose — long-lived, comparable time series, and claim
+   verification re-runs the exact filters on the reference node. The trade-off is
+   disclosed: a static query is knowable, so a determined provider could
+   special-case it.
+2. **Derived targets** (`gpa_derive`, opt-in): closes that gap. Every interval
+   (default 5m), token accounts observed in recent blocks are unpacked into two
+   memcmp anchors — the account's **mint** (holders-by-mint, offset 0) and its
+   **owner** (accounts-by-owner, offset 32) — and each candidate query is accepted
+   only after a **count-only preflight** (zero-length `dataSlice`) against the
+   derive endpoint returns between `min_accounts` and `max_accounts` matches
+   (default 5–200). Accepted targets join the rotation under the reserved names
+   `derived_token_by_mint` / `derived_token_by_owner` — constant metric labels,
+   rotating anchor underneath.
+
+   Why each piece exists:
+   - **Anchors come from live chain activity minutes old.** To pre-compute every
+     possible derived query, a provider would have to keep a fresh index over all
+     mints and owners appearing on chain — which is simply *being a good RPC
+     provider*. There is no shortcut that isn't the honest work.
+   - **The count bounds keep the probe honest in both directions.** The cap keeps
+     result sizes bounded so latency stays comparable across rounds and providers;
+     the floor means a single account closing between derivation and probe cannot
+     empty the result set (an empty result is scored a failure — the floor
+     prevents that false accusation).
+   - **The preflight never touches a provider.** It runs against the reference
+     node (or another non-benchmarked RPC), so the upcoming target is never
+     leaked to anyone being measured, and no provider pays for our derivation.
+   - **High-volume mints (USDC, USDT, wSOL) are skipped** as mint anchors — they
+     hold millions of accounts and would always fail the cap; skipping them saves
+     the derive endpoint guaranteed-futile scans.
+   - **Claim verification applies unchanged.** A derived-target response yields
+     the same accounts claim as a curated one — the claim carries the full filter
+     set, and the reference node re-runs those filters and re-counts. Rotation
+     adds unpredictability without weakening layer 2.
+
 ## What if the data is delayed, not dishonest?
 
 Delay and dishonesty are handled by different layers, deliberately:
@@ -157,6 +225,34 @@ Ambiguity always resolves toward the provider. A `mismatch` requires positive,
 cryptographically-arguable evidence — if any slot in a verification window was
 unavailable on our node, the verdict is `skipped`, not `mismatch`, because the
 claimed content could belong to the block we couldn't fetch.
+
+## Known limits
+
+Being explicit about what these layers do **not** stop is part of being auditable:
+
+- **Traffic recognition and preferential routing.** Our probes are identifiable
+  in principle: each region has stable egress IPs, every request carries no-cache
+  headers, and the cadence is regular. A provider could recognize that traffic
+  and route it to its best hardware or an uncontended path. No content check can
+  catch this — the answers on that path are genuinely correct and genuinely fast.
+  What the layers guarantee is narrower and still worth stating: a provider
+  cannot look good by *lying*, only by actually serving our requests well. The
+  residual gap between "serves the benchmark well" and "serves everyone well" can
+  be probed by occasional runs from fresh egress IPs compared against the
+  resident region's numbers; it cannot be closed by verification. (This limit is
+  not unique to us — every public RPC benchmark shares it.)
+- **Thin archival quorum at small provider counts.** The archival round's
+  majority needs at least two agreeing providers. With few providers configured —
+  or when only a couple retain a given depth — a split records `skipped`, not a
+  verdict. Fail-open by design; the check strengthens as providers join.
+- **Derived-target derivation depends on the derive endpoint.** If it is down or
+  slow, no *new* derived targets appear; the last accepted ones keep rotating and
+  the curated targets are unaffected. Degrades to the static behavior, never
+  distorts a measurement.
+- **What we can prove is content, not time.** Verification establishes that data
+  was real and fresh; latency itself is measured by our own clock on our own
+  connection and is not a claim a provider makes — there is nothing for them to
+  forge, and nothing for us to verify.
 
 ## Policy
 
