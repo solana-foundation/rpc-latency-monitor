@@ -194,10 +194,16 @@ For `getProgramAccounts` there are two tiers:
    - **High-volume mints (USDC, USDT, wSOL) are skipped** as mint anchors — they
      hold millions of accounts and would always fail the cap; skipping them saves
      the derive endpoint guaranteed-futile scans.
-   - **Claim verification applies unchanged.** A derived-target response yields
-     the same accounts claim as a curated one — the claim carries the full filter
-     set, and the reference node re-runs those filters and re-counts. Rotation
-     adds unpredictability without weakening layer 2.
+   - **Derived targets are validated live, not claim-verified.** Every returned
+     account is checked at probe time against the request's own filters (layer 0),
+     but no layer-2 claim is generated for derived targets. The reason is the
+     doc's own rule: a `mismatch` must have no innocent explanation — and derived
+     anchors are *recently active* accounts whose sets legitimately churn (token
+     accounts open and close) between the response and verification ≥32 slots
+     later, so a delayed count/sample check would misread churn as fabrication.
+     (The first fleet deployment produced exactly such false mismatches within
+     the hour.) Layer-2 verification for gPA stays on the curated targets, whose
+     stable sets make it sound.
 
 ## What if the data is delayed, not dishonest?
 

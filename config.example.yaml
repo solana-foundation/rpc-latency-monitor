@@ -103,8 +103,11 @@ gpa_targets:
 # the gpa_targets rotation under the reserved names derived_token_by_mint /
 # derived_token_by_owner (constant metric labels; the anchor rotates
 # underneath). Point `endpoint` at the reference node or another
-# non-benchmarked RPC — providers never see the preflight. Omit the whole
-# block to disable derivation.
+# non-benchmarked RPC — providers never see the preflight. Derived-target
+# responses are filter-validated live (layer 0) but generate no layer-2 claims:
+# their anchors are recently active accounts whose sets churn between response
+# and delayed verification, which would misread churn as mismatch. Omit the
+# whole block to disable derivation.
 # gpa_derive:
 #   endpoint: "http://<reference-node>:8899"
 #   interval: "5m"
