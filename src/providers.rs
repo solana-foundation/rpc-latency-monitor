@@ -30,9 +30,9 @@ pub fn redacted_url(url: &str) -> String {
 
 #[derive(Debug, thiserror::Error)]
 pub enum ResolveError {
-    #[error("provider '{provider}' references unset environment variable '{var}'")]
+    #[error("'{provider}' references unset environment variable '{var}'")]
     MissingEnv { provider: String, var: String },
-    #[error("provider '{provider}' has an unterminated '${{' placeholder in its url")]
+    #[error("'{provider}' has an unterminated '${{' placeholder in its url")]
     Unterminated { provider: String },
 }
 
@@ -43,6 +43,10 @@ pub fn resolve_endpoints(
         .iter()
         .map(|p| resolve_one(p, &|name| std::env::var(name).ok()))
         .collect()
+}
+
+pub fn resolve_url(context: &str, url: &str) -> Result<String, ResolveError> {
+    substitute(url, &|name| std::env::var(name).ok()).map_err(|e| e.with_provider(context))
 }
 
 fn resolve_one(

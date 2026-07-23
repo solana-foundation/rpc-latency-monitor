@@ -221,6 +221,9 @@ impl Config {
             if derive.endpoint.is_empty() {
                 bail!("config: gpa_derive requires an endpoint");
             }
+            if derive.interval.is_zero() {
+                bail!("config: gpa_derive interval must be non-zero");
+            }
             if derive.min_accounts == 0 || derive.min_accounts > derive.max_accounts {
                 bail!("config: gpa_derive needs 1 <= min_accounts <= max_accounts");
             }
@@ -432,6 +435,11 @@ mod tests {
 
         let no_endpoint = parse(&format!("{base}gpa_derive: {{ endpoint: \"\" }}\n"));
         assert!(no_endpoint.validate().is_err());
+
+        let zero_interval = parse(&format!(
+            "{base}gpa_derive: {{ endpoint: \"http://node\", interval: 0s }}\n"
+        ));
+        assert!(zero_interval.validate().is_err());
 
         let bad_bounds = parse(&format!(
             "{base}gpa_derive: {{ endpoint: \"http://node\", min_accounts: 50, max_accounts: 10 }}\n"

@@ -26,6 +26,10 @@ async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
     let config = Config::load(&args.config)?;
     let endpoints = providers::resolve_endpoints(&config.providers)?;
+    let mut gpa_derive = config.gpa_derive.clone();
+    if let Some(derive) = gpa_derive.as_mut() {
+        derive.endpoint = providers::resolve_url("gpa_derive.endpoint", &derive.endpoint)?;
+    }
 
     let metrics = Metrics::new(&config.region, geo::geo_for(&config.region))?;
     let client = Arc::new(RpcClient::new(config.request_timeout)?);
@@ -56,7 +60,7 @@ async fn main() -> anyhow::Result<()> {
         config.max_slot_lag,
         claims,
         config.gpa_targets.clone(),
-        config.gpa_derive.clone(),
+        gpa_derive,
     );
     reference_check::spawn_reference_check(
         &endpoints,
