@@ -2,7 +2,7 @@ use base64::Engine;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use crate::config::{GpaTarget, MemcmpFilter};
+use crate::config::{GpaTarget, MemcmpFilter, DERIVED_TARGET_PREFIX};
 use crate::rpc::{AccountSample, ClaimPayload, RequestContext};
 
 const USDC_MINT: &str = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
@@ -170,6 +170,9 @@ impl RpcMethod {
                     Self::GetProgramAccounts => ctx.gpa_target.clone()?,
                     _ => builtin_token_owner_target(),
                 };
+                if target.name.starts_with(DERIVED_TARGET_PREFIX) {
+                    return None;
+                }
                 let entries = value_of(result).as_array()?;
                 Some(ClaimPayload::Accounts {
                     slot: self.observed_slot(result),
@@ -802,6 +805,33 @@ mod tests {
         let keys: Vec<&str> = sample.iter().map(|s| s.pubkey.as_str()).collect();
         assert_eq!(keys, vec!["k0", "k5", "k9"]);
         assert_eq!(sample[0].data, "d0");
+    }
+
+    #[test]
+    fn derived_targets_yield_no_claims() {
+        let target = GpaTarget {
+            name: "derived_token_by_owner".into(),
+            program: TOKEN_PROGRAM.into(),
+            data_size: Some(TOKEN_ACCOUNT_LEN),
+            memcmp: vec![MemcmpFilter {
+                offset: TOKEN_ACCOUNT_OWNER_OFFSET,
+                bytes: "someowner".into(),
+            }],
+        };
+        let ctx = RequestContext {
+            gpa_target: Some(target),
+            ..RequestContext::default()
+        };
+        let result = json!({ "context": { "slot": 5 }, "value": [
+            { "pubkey": "k0", "account": { "data": ["d0", "base64"] } },
+        ]});
+        assert_eq!(
+            RpcMethod::GetProgramAccounts.claim_payload(&result, &ctx),
+            None
+        );
+        assert!(RpcMethod::GetProgramAccounts
+            .claim_payload(&result, &gpa_ctx())
+            .is_some());
     }
 
     #[test]
