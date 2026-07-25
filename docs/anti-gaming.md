@@ -159,6 +159,11 @@ Always on, per method:
 - **`getTransaction_recent`** chases a signature freshly surfaced by
   `getSignaturesForAddress` — it did not exist minutes earlier.
 - **Archival probes** use a random, never-repeated slot (see the archival round).
+- **`getSignaturesForAddress`** targets a permanently busy address whose first
+  page churns every slot, and the head signature's slot is taken as the
+  response's observed slot — so a cached page trips the staleness gate within
+  seconds, and the freshness signal comes from the data itself (a re-stamped
+  envelope can't help; there is no envelope).
 - **`getTokenAccountsByOwner`** alternates between a fixed large owner (the
   stable, comparable series; verified by layer-2 claims) and, when `gpa_derive`
   is enabled, the current derived owner anchor (`target="derived_token_by_owner"`

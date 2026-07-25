@@ -229,12 +229,12 @@ impl RpcMethod {
             | Self::GetMultipleAccounts
             | Self::GetProgramAccounts
             | Self::GetTokenAccountsByOwner => result.get("context")?.get("slot")?.as_u64(),
+            Self::GetSignaturesForAddress => result.as_array()?.first()?.get("slot")?.as_u64(),
             Self::GetHealth
             | Self::GetBlockRecent
             | Self::GetBlockArchival
             | Self::GetTransactionRecent
-            | Self::GetTransactionArchival
-            | Self::GetSignaturesForAddress => None,
+            | Self::GetTransactionArchival => None,
         }
     }
 
@@ -707,6 +707,19 @@ mod tests {
             Some(7)
         );
         assert_eq!(RpcMethod::GetHealth.observed_slot(&json!("ok")), None);
+    }
+
+    #[test]
+    fn signatures_page_head_slot_is_the_observed_slot() {
+        let page = json!([{ "signature": "a", "slot": 900 }, { "signature": "b", "slot": 890 }]);
+        assert_eq!(
+            RpcMethod::GetSignaturesForAddress.observed_slot(&page),
+            Some(900)
+        );
+        assert_eq!(
+            RpcMethod::GetSignaturesForAddress.observed_slot(&json!([])),
+            None
+        );
     }
 
     #[test]
