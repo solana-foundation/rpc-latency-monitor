@@ -159,6 +159,12 @@ Always on, per method:
 - **`getTransaction_recent`** chases a signature freshly surfaced by
   `getSignaturesForAddress` — it did not exist minutes earlier.
 - **Archival probes** use a random, never-repeated slot (see the archival round).
+- **`getTokenAccountsByOwner`** alternates between a fixed large owner (the
+  stable, comparable series; verified by layer-2 claims) and, when `gpa_derive`
+  is enabled, the current derived owner anchor (`target="derived_token_by_owner"`
+  — a separate series, layer-0 validated only, same churn reasoning as derived
+  gPA targets). A provider that pins a hot cache to the fixed owner's query
+  gains nothing on the rotating half.
 - **Every request** carries `Cache-Control: no-cache` / `Pragma: no-cache`.
 
 For `getProgramAccounts` there are two tiers:

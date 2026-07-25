@@ -102,11 +102,18 @@ impl RpcMethod {
                     "filters": gpa_filters(target),
                 }])
             }
-            Self::GetTokenAccountsByOwner => json!([
-                GPA_TOKEN_OWNER,
-                { "programId": TOKEN_PROGRAM },
-                { "encoding": "base64", "commitment": "processed" },
-            ]),
+            Self::GetTokenAccountsByOwner => {
+                let owner = ctx
+                    .gpa_target
+                    .as_ref()
+                    .and_then(owner_anchor)
+                    .unwrap_or_else(|| GPA_TOKEN_OWNER.to_owned());
+                json!([
+                    owner,
+                    { "programId": TOKEN_PROGRAM },
+                    { "encoding": "base64", "commitment": "processed" },
+                ])
+            }
             Self::GetSignaturesForAddress => {
                 json!([FALLBACK_ADDRESS, { "limit": SIGNATURES_LIMIT, "commitment": "confirmed" }])
             }
@@ -130,7 +137,10 @@ impl RpcMethod {
                 Some(target) => entries_match(result, target),
                 None => false,
             },
-            Self::GetTokenAccountsByOwner => entries_match(result, &builtin_token_owner_target()),
+            Self::GetTokenAccountsByOwner => match ctx.gpa_target.as_ref() {
+                Some(target) => entries_match(result, target),
+                None => entries_match(result, &builtin_token_owner_target()),
+            },
             Self::GetBlockRecent | Self::GetBlockArchival => {
                 non_empty_str(result.get("blockhash"))
                     && result
@@ -168,7 +178,10 @@ impl RpcMethod {
             Self::GetProgramAccounts | Self::GetTokenAccountsByOwner => {
                 let target = match self {
                     Self::GetProgramAccounts => ctx.gpa_target.clone()?,
-                    _ => builtin_token_owner_target(),
+                    _ => ctx
+                        .gpa_target
+                        .clone()
+                        .unwrap_or_else(builtin_token_owner_target),
                 };
                 if target.name.starts_with(DERIVED_TARGET_PREFIX) {
                     return None;
@@ -338,6 +351,14 @@ fn clock_slot_from_value(value: &Value) -> Option<u64> {
     let bytes = base64::engine::general_purpose::STANDARD.decode(b64).ok()?;
     let slot: [u8; 8] = bytes.get(0..8)?.try_into().ok()?;
     Some(u64::from_le_bytes(slot))
+}
+
+fn owner_anchor(target: &GpaTarget) -> Option<String> {
+    target
+        .memcmp
+        .iter()
+        .find(|f| f.offset == TOKEN_ACCOUNT_OWNER_OFFSET)
+        .map(|f| f.bytes.clone())
 }
 
 pub fn builtin_token_owner_target() -> GpaTarget {
@@ -832,6 +853,66 @@ mod tests {
         assert!(RpcMethod::GetProgramAccounts
             .claim_payload(&result, &gpa_ctx())
             .is_some());
+    }
+
+    fn derived_owner_target(owner: &str) -> GpaTarget {
+        GpaTarget {
+            name: "derived_token_by_owner".into(),
+            program: TOKEN_PROGRAM.into(),
+            data_size: Some(TOKEN_ACCOUNT_LEN),
+            memcmp: vec![MemcmpFilter {
+                offset: TOKEN_ACCOUNT_OWNER_OFFSET,
+                bytes: owner.into(),
+            }],
+        }
+    }
+
+    #[test]
+    fn gtabo_owner_follows_the_derived_target_and_yields_no_claim() {
+        let params = RpcMethod::GetTokenAccountsByOwner
+            .build_params(&RequestContext::default())
+            .unwrap();
+        assert_eq!(params[0], json!(GPA_TOKEN_OWNER));
+
+        let ctx = RequestContext {
+            gpa_target: Some(derived_owner_target("rotatedOwner")),
+            ..RequestContext::default()
+        };
+        let params = RpcMethod::GetTokenAccountsByOwner
+            .build_params(&ctx)
+            .unwrap();
+        assert_eq!(params[0], json!("rotatedOwner"));
+        assert_eq!(params[1], json!({ "programId": TOKEN_PROGRAM }));
+
+        let result = json!({ "context": { "slot": 5 }, "value": [
+            { "pubkey": "k0", "account": { "data": ["d0", "base64"] } },
+        ]});
+        assert_eq!(
+            RpcMethod::GetTokenAccountsByOwner.claim_payload(&result, &ctx),
+            None
+        );
+        assert!(matches!(
+            RpcMethod::GetTokenAccountsByOwner.claim_payload(&result, &RequestContext::default()),
+            Some(ClaimPayload::Accounts { target, .. }) if target.name == "token_owner"
+        ));
+    }
+
+    #[test]
+    fn gtabo_validates_against_the_rotated_owner() {
+        let owner = bs58::encode([9u8; 32]).into_string();
+        let mut data = vec![0u8; TOKEN_ACCOUNT_LEN as usize];
+        data[32..64].copy_from_slice(&[9u8; 32]);
+        let b64 = base64::engine::general_purpose::STANDARD.encode(&data);
+        let entry = json!({ "account": { "owner": TOKEN_PROGRAM, "data": [b64, "base64"] } });
+        let result = json!({ "value": [entry] });
+
+        let ctx = RequestContext {
+            gpa_target: Some(derived_owner_target(&owner)),
+            ..RequestContext::default()
+        };
+        assert!(RpcMethod::GetTokenAccountsByOwner.is_valid_result(&result, &ctx));
+        assert!(!RpcMethod::GetTokenAccountsByOwner
+            .is_valid_result(&result, &RequestContext::default()));
     }
 
     #[test]
