@@ -44,6 +44,73 @@ jobs:
       REGION: us-east4
     steps:
       - uses: actions/checkout@v4
+      - uses: dopplerhq/cli-action@014df23b1329b615816a38eb5f473bb9000700b1 # v3
+
+      - name: Fetch Slack webhook from Doppler
+        env:
+          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN }}
+        run: |
+          set -euo pipefail
+          if URL=$(doppler secrets get SLACK_DEPLOY_WEBHOOK_URL --plain \
+                     --project rpc-latency-monitor --config prd 2>&1) && [ -n "$URL" ]; then
+            echo "::add-mask::$URL"
+            echo "SLACK_WEBHOOK=$URL" >> "$GITHUB_ENV"
+          else
+            echo "::warning::SLACK_DEPLOY_WEBHOOK_URL missing or unreadable from Doppler — deploy notifications will be skipped. doppler said: $URL"
+          fi
+
+      - name: Build deploy summary (commit, actor, image)
+        id: summary
+        env:
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          SHA="$(git rev-parse --short HEAD)"
+          COMMIT_MSG=$(git log -1 --format=%s HEAD 2>/dev/null | cut -c1-140 || echo "")
+          FIELDS=$(jq -n \
+            --arg target     "all" \
+            --arg scope      "all" \
+            --arg image      "$SHA" \
+            --arg short_sha  "$SHA" \
+            --arg commit_msg "$COMMIT_MSG" \
+            --arg actor      "${{ github.actor }}" \
+            --arg run_url    "$RUN_URL" \
+            --arg run_id     "${{ github.run_id }}" \
+            '[
+              {type:"mrkdwn",text:("*Target:*\n`"+$target+"`")},
+              {type:"mrkdwn",text:("*Provider:*\n`"+$scope+"`")},
+              {type:"mrkdwn",text:("*Image:*\n`"+$image+"`")},
+              {type:"mrkdwn",text:("*Commit:*\n`"+$short_sha+"` — "+$commit_msg)},
+              {type:"mrkdwn",text:("*Triggered by:*\n"+$actor)},
+              {type:"mrkdwn",text:("*Run:*\n<"+$run_url+"|workflow #"+$run_id+">")}
+            ]')
+          {
+            echo 'fields<<JQ_FIELDS_EOF'
+            echo "$FIELDS"
+            echo 'JQ_FIELDS_EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Notify Slack — deploy started
+        if: env.SLACK_WEBHOOK != ''
+        run: |
+          PAYLOAD=$(jq -n \
+            --arg marker "[STARTED] Deploy RPC Latency Monitor" \
+            --arg target "all" \
+            --arg scope "all" \
+            --arg color "#36a64f" \
+            --argjson fields '${{ steps.summary.outputs.fields }}' \
+            '{
+              text: ("*" + $marker + "* — target: `" + $target + "` provider: `" + $scope + "`"),
+              attachments: [{
+                color: $color,
+                blocks: [
+                  {type:"section", text:{type:"mrkdwn", text:("*" + $marker + "*")}},
+                  {type:"section", fields:$fields}
+                ]
+              }]
+            }')
+          curl -sS --fail-with-body -X POST -H 'Content-Type: application/json' \
+            --data "$PAYLOAD" "$SLACK_WEBHOOK"
+
       - uses: google-github-actions/auth@v3
         with:
           workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
@@ -78,4 +145,26 @@ jobs:
               -d "$payload" >/dev/null
             echo "pushed dashboard $(basename "$f")"
           done
+
+      - name: Notify Slack — build failed
+        if: failure() && env.SLACK_WEBHOOK != ''
+        run: |
+          PAYLOAD=$(jq -n \
+            --arg marker "[FAILED] Deploy RPC Latency Monitor" \
+            --arg target "all" \
+            --arg scope "all" \
+            --arg color "#ff0000" \
+            --argjson fields '${{ steps.summary.outputs.fields }}' \
+            '{
+              text: ("*" + $marker + "* — target: `" + $target + "` provider: `" + $scope + "`"),
+              attachments: [{
+                color: $color,
+                blocks: [
+                  {type:"section", text:{type:"mrkdwn", text:("*" + $marker + "*")}},
+                  {type:"section", fields:$fields}
+                ]
+              }]
+            }')
+          curl -sS --fail-with-body -X POST -H 'Content-Type: application/json' \
+            --data "$PAYLOAD" "$SLACK_WEBHOOK"
 
