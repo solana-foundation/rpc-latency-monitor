@@ -43,9 +43,10 @@ Only immutable image shas deploy — never `:latest`.
 - **Doppler (`rpc-latency-monitor/prd`):** provider keys,
   `MONITOR_DOPPLER_TOKEN` (VM service token), `REFERENCE_RPC_URL` (the
   reference node — deliberately unlisted), `INVENTORY_LATITUDE_B64`,
-  `INVENTORY_TSW_B64`, `SLACK_DEPLOY_WEBHOOK_URL` (deploy notifications,
-  fetched by the workflow at run time), `GRAFANA_API_*`,
-  `GRAFANA_CLOUD_PROM_*`.
+  `INVENTORY_TSW_B64`, `KNOWN_HOSTS_B64` (SSH host keys for every bare-metal
+  box; strict host-key checking — refresh via ssh-keyscan when a box is
+  provisioned), `SLACK_DEPLOY_WEBHOOK_URL` (deploy notifications, fetched by
+  the workflow at run time), `GRAFANA_API_*`, `GRAFANA_CLOUD_PROM_*`.
 - Cloud auth is Workload Identity Federation / OIDC — no static cloud keys
   anywhere. VM secrets are fetched from Doppler at boot, never baked into
   images or metadata beyond the scoped service token.

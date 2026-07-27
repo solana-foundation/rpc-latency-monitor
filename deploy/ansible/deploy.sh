@@ -31,6 +31,16 @@ materialize_inventory() {
 materialize_inventory INVENTORY_LATITUDE_B64 latitude.yml
 materialize_inventory INVENTORY_TSW_B64 teraswitch.yml
 
+# Host keys (KNOWN_HOSTS_B64, base64 of an ssh known_hosts file covering every
+# inventory host) back the strict host-key check in ansible.cfg. Refreshed by
+# ssh-keyscan whenever a box is provisioned or reinstalled.
+if [ ! -f "$SCRIPT_DIR/known_hosts" ]; then
+  : "${KNOWN_HOSTS_B64:?set KNOWN_HOSTS_B64 (base64 known_hosts) — strict host-key checking needs it}"
+  echo "$KNOWN_HOSTS_B64" | base64 -d >"$SCRIPT_DIR/known_hosts"
+  chmod 600 "$SCRIPT_DIR/known_hosts"
+  echo "materialized known_hosts from KNOWN_HOSTS_B64"
+fi
+
 # Pass vars via a locked-down temp file, not inline -e, so the Doppler token
 # never appears in `ps aux` on the runner.
 VARS_FILE="$(mktemp)"
