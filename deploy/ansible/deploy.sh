@@ -17,28 +17,31 @@ echo "deploying ref: $IMAGE_SHA"
 # Inventories carry the bare-metal box IPs (SSH targets) and are not committed
 # to this public repo. They are materialized from Doppler at deploy time:
 # INVENTORY_LATITUDE_B64 / INVENTORY_TSW_B64 = base64 of the inventory YAML
-# (see inventory/example.yml.tmpl for the shape). A pre-existing local file is
-# left alone so local runs with a hand-written inventory still work.
-materialize_inventory() {
-  local var="$1" file="$SCRIPT_DIR/inventory/$2"
+# (see inventory/example.yml.tmpl for the shape). Doppler is authoritative:
+# when the env var is set it always overwrites, so updates (new boxes, rotated
+# keys) land on the next deploy even on a persistent runner. A hand-written
+# local file is only used when the env var is absent (local runs).
+materialize() {
+  local var="$1" file="$SCRIPT_DIR/$2"
   local value="${!var:-}"
-  [ -f "$file" ] && return 0
-  [ -z "$value" ] && return 0
+  if [ -z "$value" ]; then
+    [ -f "$file" ] && echo "note: $2 not in $var — using existing local file"
+    return 0
+  fi
   echo "$value" | base64 -d >"$file"
   chmod 600 "$file"
-  echo "materialized inventory/$2 from $var"
+  echo "materialized $2 from $var"
 }
-materialize_inventory INVENTORY_LATITUDE_B64 latitude.yml
-materialize_inventory INVENTORY_TSW_B64 teraswitch.yml
+materialize INVENTORY_LATITUDE_B64 inventory/latitude.yml
+materialize INVENTORY_TSW_B64 inventory/teraswitch.yml
 
-# Host keys (KNOWN_HOSTS_B64, base64 of an ssh known_hosts file covering every
-# inventory host) back the strict host-key check in ansible.cfg. Refreshed by
+# Host keys (base64 of an ssh known_hosts covering every inventory host) back
+# the strict host-key check in ansible.cfg. Refreshed in Doppler by
 # ssh-keyscan whenever a box is provisioned or reinstalled.
+materialize KNOWN_HOSTS_B64 known_hosts
 if [ ! -f "$SCRIPT_DIR/known_hosts" ]; then
-  : "${KNOWN_HOSTS_B64:?set KNOWN_HOSTS_B64 (base64 known_hosts) — strict host-key checking needs it}"
-  echo "$KNOWN_HOSTS_B64" | base64 -d >"$SCRIPT_DIR/known_hosts"
-  chmod 600 "$SCRIPT_DIR/known_hosts"
-  echo "materialized known_hosts from KNOWN_HOSTS_B64"
+  echo "error: no known_hosts — set KNOWN_HOSTS_B64 (strict host-key checking needs it)" >&2
+  exit 1
 fi
 
 # Pass vars via a locked-down temp file, not inline -e, so the Doppler token
