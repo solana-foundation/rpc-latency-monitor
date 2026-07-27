@@ -39,12 +39,13 @@ Only immutable image shas deploy — never `:latest`.
 - **GitHub vars:** `GCP_WORKLOAD_IDENTITY_PROVIDER`, `GCP_SERVICE_ACCOUNT`,
   `GCP_PROJECT_ID`, `TF_STATE_BUCKET`, `AWS_TF_STATE_BUCKET`,
   `AWS_DEPLOY_ROLE_ARN`, `GRAFANA_API_URL`, `GRAFANA_FOLDER_UID`.
-- **GitHub secrets (environment `prod`):** `DOPPLER_TOKEN`,
-  `SLACK_DEPLOY_WEBHOOK_URL`, `GRAFANA_API_TOKEN`.
+- **GitHub secrets (environment `prod`):** `DOPPLER_TOKEN`, `GRAFANA_API_TOKEN`.
 - **Doppler (`rpc-latency-monitor/prd`):** provider keys,
   `MONITOR_DOPPLER_TOKEN` (VM service token), `REFERENCE_RPC_URL` (the
   reference node — deliberately unlisted), `INVENTORY_LATITUDE_B64`,
-  `INVENTORY_TSW_B64`, `GRAFANA_API_*`, `GRAFANA_CLOUD_PROM_*`.
+  `INVENTORY_TSW_B64`, `SLACK_DEPLOY_WEBHOOK_URL` (deploy notifications,
+  fetched by the workflow at run time), `GRAFANA_API_*`,
+  `GRAFANA_CLOUD_PROM_*`.
 - Cloud auth is Workload Identity Federation / OIDC — no static cloud keys
   anywhere. VM secrets are fetched from Doppler at boot, never baked into
   images or metadata beyond the scoped service token.

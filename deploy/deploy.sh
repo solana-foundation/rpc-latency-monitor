@@ -6,6 +6,13 @@ set -euo pipefail
 # Run under `doppler run` so the sub-deploys see secrets.
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROVIDER="${PROVIDER:-${1:-all}}"
+TARGET="${TARGET:-all}"
+
+# Alerts live only in the GCP deploy path; TARGET=alerts must not roll any
+# fleet, whatever PROVIDER says.
+if [ "$TARGET" = "alerts" ]; then
+  PROVIDER=gcp
+fi
 
 run_gcp() {
   : "${PROJECT:?}" "${GCP_TF_STATE_BUCKET:?}"

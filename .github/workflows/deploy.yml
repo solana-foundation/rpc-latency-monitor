@@ -45,7 +45,7 @@ jobs:
       DOPPLER_CONFIG: prd
       REGION: us-east4
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Resolve image sha
         id: image
@@ -60,35 +60,93 @@ jobs:
           echo "deploying image sha: ${SHA:-<current state>}"
 
       - if: env.PROVIDER == 'all' || env.PROVIDER == 'gcp'
-        uses: google-github-actions/auth@v3
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
         with:
           workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
       - if: env.PROVIDER == 'all' || env.PROVIDER == 'gcp'
-        uses: google-github-actions/setup-gcloud@v2
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
       - if: env.PROVIDER == 'all' || env.PROVIDER == 'aws'
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
         with:
           role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
           aws-region: us-east-1
-      - uses: hashicorp/setup-terraform@v3
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3
         with:
           terraform_wrapper: false
-      - uses: dopplerhq/cli-action@v3
+      - uses: dopplerhq/cli-action@014df23b1329b615816a38eb5f473bb9000700b1 # v3
 
-      - name: Build Slack fields
-        id: summary
+      - name: Fetch Slack webhook from Doppler
         env:
-          ACTOR: ${{ github.actor }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          RUN_ID: ${{ github.run_id }}
+          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN }}
         run: |
           set -euo pipefail
-          SHA=$(git rev-parse HEAD)
-          MSG=$(git log -1 --format=%s HEAD 2>/dev/null | cut -c1-140 || echo "")
-          FIELDS=$(jq -n --arg s "${SHA:0:7}" --arg m "$MSG" --arg a "$ACTOR" --arg u "$RUN_URL" --arg r "$RUN_ID" \
-            '[{type:"mrkdwn",text:("*Commit:*\n`"+$s+"` — "+$m)},{type:"mrkdwn",text:("*Triggered by:*\n"+$a)},{type:"mrkdwn",text:("*Run:*\n<"+$u+"|workflow #"+$r+">")}]')
-          { echo 'fields<<JQ'; echo "$FIELDS"; echo 'JQ'; } >> "$GITHUB_OUTPUT"
+          if URL=$(doppler secrets get SLACK_DEPLOY_WEBHOOK_URL --plain \
+                     --project "$DOPPLER_PROJECT" --config "$DOPPLER_CONFIG" 2>&1) && [ -n "$URL" ]; then
+            echo "::add-mask::$URL"
+            echo "SLACK_WEBHOOK=$URL" >> "$GITHUB_ENV"
+          else
+            echo "::warning::SLACK_DEPLOY_WEBHOOK_URL missing or unreadable from Doppler — deploy notifications will be skipped. doppler said: $URL"
+          fi
+
+      - name: Build deploy summary (commit, actor, target)
+        id: summary
+        env:
+          SHA: ${{ github.sha }}
+          IMAGE_SHA: ${{ steps.image.outputs.sha }}
+          ACTOR: ${{ github.event.workflow_run.actor.login || github.actor }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          COMMIT_MSG=$(git log -1 --format=%s "$SHA" 2>/dev/null | cut -c1-140 || echo "")
+
+          # Build the shared Slack payload `fields` block once via jq; each
+          # notification step prepends a marker text. jq handles all JSON
+          # escaping (backslashes, quotes, control chars) safely.
+          FIELDS=$(jq -n \
+            --arg target     "$TARGET" \
+            --arg scope      "$PROVIDER" \
+            --arg image      "${IMAGE_SHA:-current state}" \
+            --arg short_sha  "${SHA:0:7}" \
+            --arg commit_msg "$COMMIT_MSG" \
+            --arg actor      "$ACTOR" \
+            --arg run_url    "$RUN_URL" \
+            --arg run_id     "${{ github.run_id }}" \
+            '[
+              {type:"mrkdwn",text:("*Target:*\n`"+$target+"`")},
+              {type:"mrkdwn",text:("*Provider:*\n`"+$scope+"`")},
+              {type:"mrkdwn",text:("*Image:*\n`"+$image+"`")},
+              {type:"mrkdwn",text:("*Commit:*\n`"+$short_sha+"` — "+$commit_msg)},
+              {type:"mrkdwn",text:("*Triggered by:*\n"+$actor)},
+              {type:"mrkdwn",text:("*Run:*\n<"+$run_url+"|workflow #"+$run_id+">")}
+            ]')
+
+          {
+            echo 'fields<<JQ_FIELDS_EOF'
+            echo "$FIELDS"
+            echo 'JQ_FIELDS_EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Notify Slack — deploy started
+        if: env.SLACK_WEBHOOK != ''
+        run: |
+          PAYLOAD=$(jq -n \
+            --arg marker "[STARTED] Deploy RPC Latency Monitor" \
+            --arg target "$TARGET" \
+            --arg scope "$PROVIDER" \
+            --arg color "#36a64f" \
+            --argjson fields '${{ steps.summary.outputs.fields }}' \
+            '{
+              text: ("*" + $marker + "* — target: `" + $target + "` provider: `" + $scope + "`"),
+              attachments: [{
+                color: $color,
+                blocks: [
+                  {type:"section", text:{type:"mrkdwn", text:("*" + $marker + "*")}},
+                  {type:"section", fields:$fields}
+                ]
+              }]
+            }')
+          curl -sS --fail-with-body -X POST -H 'Content-Type: application/json' \
+            --data "$PAYLOAD" "$SLACK_WEBHOOK"
 
       - name: Deploy (terraform + ansible dispatch)
         env:
@@ -105,22 +163,46 @@ jobs:
                 GCP_TF_STATE_BUCKET="$GCP_TF_STATE_BUCKET" AWS_TF_STATE_BUCKET="$AWS_TF_STATE_BUCKET" \
             ./deploy/deploy.sh
 
-      - name: Notify Slack — succeeded
-        if: success()
-        env: { SLACK: "${{ secrets.SLACK_DEPLOY_WEBHOOK_URL }}", FIELDS: "${{ steps.summary.outputs.fields }}" }
+      - name: Notify Slack — deploy succeeded
+        if: success() && env.SLACK_WEBHOOK != ''
         run: |
-          set -euo pipefail
-          [ -z "${SLACK:-}" ] && exit 0; echo "::add-mask::$SLACK"
-          PAYLOAD=$(jq -n --arg m "[SUCCESS] Deploy rpc-latency-monitor" --arg c "#36a64f" --argjson f "$FIELDS" \
-            '{text:("*"+$m+"*"),attachments:[{color:$c,blocks:[{type:"section",text:{type:"mrkdwn",text:("*"+$m+"*")}},{type:"section",fields:$f}]}]}')
-          curl -sS --fail-with-body -X POST -H 'Content-Type: application/json' --data "$PAYLOAD" "$SLACK"
+          PAYLOAD=$(jq -n \
+            --arg marker "[SUCCESS] Deploy RPC Latency Monitor" \
+            --arg target "$TARGET" \
+            --arg scope "$PROVIDER" \
+            --arg color "#36a64f" \
+            --argjson fields '${{ steps.summary.outputs.fields }}' \
+            '{
+              text: ("*" + $marker + "* — target: `" + $target + "` provider: `" + $scope + "`"),
+              attachments: [{
+                color: $color,
+                blocks: [
+                  {type:"section", text:{type:"mrkdwn", text:("*" + $marker + "*")}},
+                  {type:"section", fields:$fields}
+                ]
+              }]
+            }')
+          curl -sS --fail-with-body -X POST -H 'Content-Type: application/json' \
+            --data "$PAYLOAD" "$SLACK_WEBHOOK"
 
-      - name: Notify Slack — failed
-        if: failure()
-        env: { SLACK: "${{ secrets.SLACK_DEPLOY_WEBHOOK_URL }}", FIELDS: "${{ steps.summary.outputs.fields }}" }
+      - name: Notify Slack — deploy failed
+        if: failure() && env.SLACK_WEBHOOK != ''
         run: |
-          set -euo pipefail
-          [ -z "${SLACK:-}" ] && exit 0; echo "::add-mask::$SLACK"
-          PAYLOAD=$(jq -n --arg m "[FAILED] Deploy rpc-latency-monitor" --arg c "#cc0000" --argjson f "$FIELDS" \
-            '{text:("*"+$m+"*"),attachments:[{color:$c,blocks:[{type:"section",text:{type:"mrkdwn",text:("*"+$m+"*")}},{type:"section",fields:$f}]}]}')
-          curl -sS --fail-with-body -X POST -H 'Content-Type: application/json' --data "$PAYLOAD" "$SLACK"
+          PAYLOAD=$(jq -n \
+            --arg marker "[FAILED] Deploy RPC Latency Monitor" \
+            --arg target "$TARGET" \
+            --arg scope "$PROVIDER" \
+            --arg color "#ff0000" \
+            --argjson fields '${{ steps.summary.outputs.fields }}' \
+            '{
+              text: ("*" + $marker + "* — target: `" + $target + "` provider: `" + $scope + "`"),
+              attachments: [{
+                color: $color,
+                blocks: [
+                  {type:"section", text:{type:"mrkdwn", text:("*" + $marker + "*")}},
+                  {type:"section", fields:$fields}
+                ]
+              }]
+            }')
+          curl -sS --fail-with-body -X POST -H 'Content-Type: application/json' \
+            --data "$PAYLOAD" "$SLACK_WEBHOOK"

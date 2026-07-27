@@ -118,10 +118,30 @@
   notify: restart alloy
 
 # --- doppler secrets → root-owned env file for both units ---
+- name: Check installed doppler version
+  ansible.builtin.command: /usr/local/bin/doppler --version
+  register: doppler_installed
+  changed_when: false
+  failed_when: false
+
+- name: Download doppler CLI (pinned version + checksum)
+  ansible.builtin.get_url:
+    url: "https://github.com/DopplerHQ/cli/releases/download/{{ doppler_version }}/doppler_{{ doppler_version }}_linux_amd64.tar.gz"
+    dest: /tmp/doppler.tar.gz
+    checksum: "sha256:{{ doppler_sha256 }}"
+    mode: "0644"
+  when: doppler_version not in (doppler_installed.stdout | default(''))
+
 - name: Install doppler CLI
-  ansible.builtin.shell: curl -Ls https://cli.doppler.com/install.sh | sh
-  args:
-    creates: /usr/bin/doppler
+  ansible.builtin.unarchive:
+    src: /tmp/doppler.tar.gz
+    dest: /usr/local/bin
+    include: [doppler]
+    remote_src: true
+    owner: root
+    group: root
+    mode: "0755"
+  when: doppler_version not in (doppler_installed.stdout | default(''))
   become: true
 
 - name: Download secrets
