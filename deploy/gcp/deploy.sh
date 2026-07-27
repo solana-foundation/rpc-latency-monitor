@@ -8,9 +8,6 @@ TF_DIR="$SCRIPT_DIR/terraform"
 PROJECT="${PROJECT:?PROJECT=<gcp project id>}"
 REGION="${REGION:-us-east4}"
 TARGET="${TARGET:-all}"
-# Immutable image only. IMAGE_SHA (from the build-publish dispatch, or a manual
-# input) pins an exact build; blank means redeploy whatever is already in state.
-# We never deploy a mutable :latest tag.
 IMAGE_SHA="${IMAGE_SHA:-}"
 
 push_alerts() {

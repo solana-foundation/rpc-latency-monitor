@@ -36,7 +36,6 @@
     mode: "0750"
   become: true
 
-# --- monitor binary: on-target rust build at the pinned git ref ---
 - name: Install build dependencies
   ansible.builtin.apt:
     name: "{{ apt_build_deps }}"
@@ -84,7 +83,6 @@
   become: true
   notify: restart rpc-monitor
 
-# --- alloy binary (pinned, native) ---
 - name: Check installed alloy version
   ansible.builtin.command: "{{ alloy_bin }} --version"
   register: alloy_installed
@@ -117,7 +115,6 @@
   become: true
   notify: restart alloy
 
-# --- doppler secrets → root-owned env file for both units ---
 - name: Check installed doppler version
   ansible.builtin.command: /usr/local/bin/doppler --version
   register: doppler_installed
@@ -167,7 +164,6 @@
     - restart rpc-monitor
     - restart alloy
 
-# --- shared config (reused across all providers) ---
 - name: Install monitor config
   ansible.builtin.copy:
     src: "{{ playbook_dir }}/../gcp/config.yaml"
@@ -188,7 +184,6 @@
   become: true
   notify: restart alloy
 
-# --- systemd units ---
 - name: Install rpc-monitor unit
   ansible.builtin.template:
     src: rpc-monitor.service.j2

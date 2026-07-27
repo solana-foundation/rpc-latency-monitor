@@ -1,9 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# One deploy entrypoint for every provider. gcp/aws go through terraform,
-# latitude/tsw through ansible. PROVIDER picks which; `all` does the lot.
-# Run under `doppler run` so the sub-deploys see secrets.
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROVIDER="${PROVIDER:-${1:-all}}"
 TARGET="${TARGET:-all}"
@@ -24,9 +21,6 @@ run_aws() {
     IMAGE_SHA="${IMAGE_SHA:-}" "$ROOT/aws/deploy.sh"
 }
 
-# Bare metal deploys over SSH from the self-hosted runner using its own
-# ~/.ssh key (authorized on the hosts). Groups with no active inventory hosts
-# no-op loudly, so `all` stays safe while a provider is still being provisioned.
 run_metal() {
   local group="$1"
   local count

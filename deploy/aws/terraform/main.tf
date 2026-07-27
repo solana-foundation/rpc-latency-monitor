@@ -6,43 +6,42 @@ terraform {
       version = "~> 5.0"
     }
   }
-  # Remote state for CI. Local runs: init with -backend-config for bucket/region.
   backend "s3" {}
 }
 
 provider "aws" {
-  alias   = "us_east_1"
-  region  = "us-east-1"
+  alias  = "us_east_1"
+  region = "us-east-1"
 }
 
 provider "aws" {
-  alias   = "us_west_1"
-  region  = "us-west-1"
+  alias  = "us_west_1"
+  region = "us-west-1"
 }
 
 provider "aws" {
-  alias   = "eu_west_2"
-  region  = "eu-west-2"
+  alias  = "eu_west_2"
+  region = "eu-west-2"
 }
 
 provider "aws" {
-  alias   = "eu_central_1"
-  region  = "eu-central-1"
+  alias  = "eu_central_1"
+  region = "eu-central-1"
 }
 
 provider "aws" {
-  alias   = "eu_west_1"
-  region  = "eu-west-1"
+  alias  = "eu_west_1"
+  region = "eu-west-1"
 }
 
 provider "aws" {
-  alias   = "ap_northeast_1"
-  region  = "ap-northeast-1"
+  alias  = "ap_northeast_1"
+  region = "ap-northeast-1"
 }
 
 provider "aws" {
-  alias   = "ap_southeast_1"
-  region  = "ap-southeast-1"
+  alias  = "ap_southeast_1"
+  region = "ap-southeast-1"
 }
 
 resource "aws_iam_role" "monitor" {

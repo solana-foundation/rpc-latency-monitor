@@ -41,7 +41,7 @@ resource "aws_instance" "monitor" {
     doppler_token      = var.doppler_token
     monitor_config_b64 = base64encode(var.monitor_config)
     alloy_config_b64   = base64encode(var.alloy_config)
-    })}\n${file("${path.module}/../../../../shared/run-monitor.sh")}"
+  })}\n${file("${path.module}/../../../../shared/run-monitor.sh")}"
 
   metadata_options {
     http_tokens                 = "required"

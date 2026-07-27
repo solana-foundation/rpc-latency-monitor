@@ -4,9 +4,6 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TF_DIR="$SCRIPT_DIR/terraform"
 
-# Immutable image only. IMAGE_SHA (from the build-publish dispatch, or a manual
-# input) pins an exact build; blank means redeploy whatever is already in state.
-# The image lives in the (public) GCP Artifact Registry; AWS pulls it anonymously.
 IMAGE_SHA="${IMAGE_SHA:-}"
 IMAGE_REPO="${IMAGE_REPO:-us-east4-docker.pkg.dev/rpc-latency-monitor/rpc-latency-monitor/rpc-latency-monitor}"
 STATE_REGION="${STATE_REGION:-us-east-1}"
@@ -34,9 +31,6 @@ echo "deploying image: $image"
 
 export TF_VAR_doppler_token="${MONITOR_DOPPLER_TOKEN}"
 
-# Roll one region at a time (each is replaced via user_data_replace_on_change),
-# so the AWS vantage is never fully dark during a redeploy — mirrors the GCP
-# staggered reset. A final untargeted apply reconciles shared/IAM resources.
 MODULES="us_east_1 us_west_1 eu_west_2 eu_central_1 eu_west_1 ap_northeast_1 ap_southeast_1"
 RESET_DELAY="${RESET_DELAY:-30}"
 first=1

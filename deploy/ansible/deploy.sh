@@ -3,10 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Bare metal builds the monitor natively (no docker) from the pinned git ref —
-# same immutable sha the docker fleets pin their image to.
 IMAGE_SHA="${IMAGE_SHA:-}"
-# LIMIT lets you target one provider/host, e.g. LIMIT=tsw or LIMIT=rpc-monitor-fra-1.
 LIMIT="${LIMIT:-}"
 
 : "${IMAGE_SHA:?set IMAGE_SHA to an immutable build sha}"
@@ -34,8 +31,6 @@ if [ ! -f "$SCRIPT_DIR/known_hosts" ]; then
   exit 1
 fi
 
-# Pass vars via a locked-down temp file, not inline -e, so the Doppler token
-# never appears in `ps aux` on the runner.
 VARS_FILE="$(mktemp)"
 chmod 600 "$VARS_FILE"
 trap 'rm -f "$VARS_FILE"' EXIT

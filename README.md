@@ -219,7 +219,7 @@ so we fix the setup, not the numbers.
 
 The full deployment — terraform for the cloud fleets, ansible for bare metal, the deploy
 workflow, alert rules, and the fleet runtime config — lives in this repo under
-[`deploy/`](./deploy/README.md), so operations are as auditable as the methodology. The
+[`deploy/`](./deploy), so operations are as auditable as the methodology. The
 Solana Foundation runs the monitor across four infrastructures (GCP, AWS, and two bare-metal
 providers); the original GCP fleet spans seven regions across North America, Europe, and Asia:
 
@@ -325,9 +325,7 @@ code changes — they are configuration. If you are an RPC provider adding yours
 [Adding your RPC (for providers)](#adding-your-rpc-for-providers).
 
 The public-facing data view is built natively on **solana.com/data**, which queries these metrics
-server-side (read-only) and owns the on-brand UI and filters; the Grafana boards stay internal. An
-earlier option to public-share Grafana directly, fronted by Cloudflare, is documented in
-[`docs/public-hardening.md`](./docs/public-hardening.md) but is not the path taken.
+server-side (read-only) and owns the on-brand UI and filters; the Grafana boards stay internal.
 
 ## License
 

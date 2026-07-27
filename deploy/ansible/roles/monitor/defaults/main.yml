@@ -3,7 +3,6 @@ monitor_repo: "https://github.com/solana-foundation/rpc-latency-monitor.git"
 monitor_src_dir: "{{ ansible_user_dir }}/rpc-latency-monitor-src"
 monitor_bin: "/usr/local/bin/rpc-latency-monitor"
 
-# Pinned to match the docker fleets' alloy (grafana/alloy:v1.17.1).
 alloy_version: "v1.17.1"
 alloy_bin: "/usr/local/bin/alloy"
 doppler_version: "3.76.1"
@@ -14,7 +13,6 @@ data_dir: "/var/lib/rpc-latency-monitor"
 env_file: "/etc/rpc-latency-monitor/env"
 run_user: "rpc-monitor"
 
-# Matches the rust:1-bookworm builder in the app Dockerfile (rustls, no openssl).
 apt_build_deps:
   - build-essential
   - pkg-config
