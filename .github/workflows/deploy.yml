@@ -40,7 +40,9 @@ jobs:
     environment: prod
     env:
       TARGET: ${{ github.event.inputs.target || 'all' }}
-      PROVIDER: ${{ github.event.inputs.provider || 'all' }}
+      # Alerts live only in the GCP deploy path; an alerts-only run must not
+      # touch (or authenticate to) any other provider.
+      PROVIDER: ${{ github.event.inputs.target == 'alerts' && 'gcp' || github.event.inputs.provider || 'all' }}
       DOPPLER_PROJECT: rpc-latency-monitor
       DOPPLER_CONFIG: prd
       REGION: us-east4
