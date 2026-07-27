@@ -79,18 +79,5 @@ jobs:
             echo "pushed dashboard $(basename "$f")"
           done
 
-      - name: Trigger ops deploy
-        env:
-          OPS_TOKEN: ${{ secrets.OPS_DISPATCH_TOKEN }}
-        run: |
-          set -euo pipefail
-          SHA="$(git rev-parse --short HEAD)"
-          if [ -z "${OPS_TOKEN:-}" ]; then
-            echo "::notice::OPS_DISPATCH_TOKEN not set — deploy manually from rpc-latency-monitor-ops with image_sha=${SHA}"
-            exit 0
-          fi
-          curl -sS --fail-with-body -X POST \
-            -H "Authorization: Bearer $OPS_TOKEN" -H "Accept: application/vnd.github+json" \
-            https://api.github.com/repos/solana-foundation/rpc-latency-monitor-ops/dispatches \
-            -d "{\"event_type\":\"deploy\",\"client_payload\":{\"image_sha\":\"${SHA}\"}}"
-          echo "dispatched deploy of ${SHA} to rpc-latency-monitor-ops"
+      # Deploy is triggered natively: .github/workflows/deploy.yml runs on
+      # workflow_run when this workflow completes successfully on main.

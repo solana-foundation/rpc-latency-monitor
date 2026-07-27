@@ -1,0 +1,126 @@
+name: Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "What to deploy"
+        type: choice
+        options: [all, fleet, alerts]
+        default: all
+        required: true
+      image_sha:
+        description: "Image sha to deploy (blank = redeploy the current one in state)"
+        required: false
+        default: ""
+      provider:
+        description: "Which provider(s) to deploy (all = every provider; gcp/aws via terraform, latitude/tsw via ansible)"
+        type: choice
+        options: [all, gcp, aws, latitude, tsw]
+        default: all
+        required: true
+  workflow_run:
+    workflows: ["Build & Publish"]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy fleet + alerts (${{ github.event.inputs.target || 'all' }})
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: [self-hosted, rpc-latency]
+    environment: prod
+    env:
+      TARGET: ${{ github.event.inputs.target || 'all' }}
+      PROVIDER: ${{ github.event.inputs.provider || 'all' }}
+      DOPPLER_PROJECT: rpc-latency-monitor
+      DOPPLER_CONFIG: prd
+      REGION: us-east4
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve image sha
+        id: image
+        env:
+          INPUT_SHA: ${{ github.event.inputs.image_sha || '' }}
+          RUN_SHA: ${{ github.event.workflow_run.head_sha || '' }}
+        run: |
+          set -euo pipefail
+          SHA="$INPUT_SHA"
+          if [ -z "$SHA" ] && [ -n "$RUN_SHA" ]; then SHA="$(echo "$RUN_SHA" | cut -c1-7)"; fi
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "deploying image sha: ${SHA:-<current state>}"
+
+      - if: env.PROVIDER == 'all' || env.PROVIDER == 'gcp'
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+      - if: env.PROVIDER == 'all' || env.PROVIDER == 'gcp'
+        uses: google-github-actions/setup-gcloud@v2
+      - if: env.PROVIDER == 'all' || env.PROVIDER == 'aws'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: us-east-1
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+      - uses: dopplerhq/cli-action@v3
+
+      - name: Build Slack fields
+        id: summary
+        env:
+          ACTOR: ${{ github.actor }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          SHA=$(git rev-parse HEAD)
+          MSG=$(git log -1 --format=%s HEAD 2>/dev/null | cut -c1-140 || echo "")
+          FIELDS=$(jq -n --arg s "${SHA:0:7}" --arg m "$MSG" --arg a "$ACTOR" --arg u "$RUN_URL" --arg r "$RUN_ID" \
+            '[{type:"mrkdwn",text:("*Commit:*\n`"+$s+"` — "+$m)},{type:"mrkdwn",text:("*Triggered by:*\n"+$a)},{type:"mrkdwn",text:("*Run:*\n<"+$u+"|workflow #"+$r+">")}]')
+          { echo 'fields<<JQ'; echo "$FIELDS"; echo 'JQ'; } >> "$GITHUB_OUTPUT"
+
+      - name: Deploy (terraform + ansible dispatch)
+        env:
+          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN }}
+          IMAGE_SHA: ${{ steps.image.outputs.sha }}
+          PROJECT: ${{ vars.GCP_PROJECT_ID }}
+          GCP_TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+          AWS_TF_STATE_BUCKET: ${{ vars.AWS_TF_STATE_BUCKET }}
+        run: |
+          set -euo pipefail
+          doppler run --project "$DOPPLER_PROJECT" --config "$DOPPLER_CONFIG" -- \
+            env PROVIDER="$PROVIDER" IMAGE_SHA="$IMAGE_SHA" TARGET="$TARGET" \
+                PROJECT="$PROJECT" REGION="$REGION" \
+                GCP_TF_STATE_BUCKET="$GCP_TF_STATE_BUCKET" AWS_TF_STATE_BUCKET="$AWS_TF_STATE_BUCKET" \
+            ./deploy/deploy.sh
+
+      - name: Notify Slack — succeeded
+        if: success()
+        env: { SLACK: "${{ secrets.SLACK_DEPLOY_WEBHOOK_URL }}", FIELDS: "${{ steps.summary.outputs.fields }}" }
+        run: |
+          set -euo pipefail
+          [ -z "${SLACK:-}" ] && exit 0; echo "::add-mask::$SLACK"
+          PAYLOAD=$(jq -n --arg m "[SUCCESS] Deploy rpc-latency-monitor" --arg c "#36a64f" --argjson f "$FIELDS" \
+            '{text:("*"+$m+"*"),attachments:[{color:$c,blocks:[{type:"section",text:{type:"mrkdwn",text:("*"+$m+"*")}},{type:"section",fields:$f}]}]}')
+          curl -sS --fail-with-body -X POST -H 'Content-Type: application/json' --data "$PAYLOAD" "$SLACK"
+
+      - name: Notify Slack — failed
+        if: failure()
+        env: { SLACK: "${{ secrets.SLACK_DEPLOY_WEBHOOK_URL }}", FIELDS: "${{ steps.summary.outputs.fields }}" }
+        run: |
+          set -euo pipefail
+          [ -z "${SLACK:-}" ] && exit 0; echo "::add-mask::$SLACK"
+          PAYLOAD=$(jq -n --arg m "[FAILED] Deploy rpc-latency-monitor" --arg c "#cc0000" --argjson f "$FIELDS" \
+            '{text:("*"+$m+"*"),attachments:[{color:$c,blocks:[{type:"section",text:{type:"mrkdwn",text:("*"+$m+"*")}},{type:"section",fields:$f}]}]}')
+          curl -sS --fail-with-body -X POST -H 'Content-Type: application/json' --data "$PAYLOAD" "$SLACK"

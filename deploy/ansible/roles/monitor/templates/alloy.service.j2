@@ -1,0 +1,27 @@
+[Unit]
+Description=Grafana Alloy (rpc-latency-monitor)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User={{ run_user }}
+Group={{ run_user }}
+EnvironmentFile={{ env_file }}
+Environment=MONITOR_INFRA={{ monitor_infra }}
+ExecStart={{ alloy_bin }} run {{ conf_dir }}/config.alloy --storage.path={{ data_dir }}/alloy
+Restart=always
+RestartSec=5s
+LimitNOFILE=65536
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ProtectControlGroups=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target

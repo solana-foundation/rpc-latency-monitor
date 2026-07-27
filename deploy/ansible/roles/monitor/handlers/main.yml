@@ -1,0 +1,13 @@
+- name: restart rpc-monitor
+  ansible.builtin.systemd:
+    name: rpc-monitor
+    state: restarted
+    daemon_reload: true
+  become: true
+
+- name: restart alloy
+  ansible.builtin.systemd:
+    name: alloy
+    state: restarted
+    daemon_reload: true
+  become: true

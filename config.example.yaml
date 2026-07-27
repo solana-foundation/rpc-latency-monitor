@@ -66,7 +66,7 @@ reference_slot:
 # (this round owns them).
 # claim_checks: false
 # reference_check:
-#   rpc_url: "http://<reference-node>:8899"
+#   rpc_url: "${REFERENCE_RPC_URL}"   # ${ENV_VAR} placeholders resolve at startup
 #   exclude_provider: helius   # don't judge the reference against itself
 #   interval: "5m"
 #   depth: 64                  # checked slot = reference finalized tip - depth
@@ -109,7 +109,7 @@ gpa_targets:
 # and delayed verification, which would misread churn as mismatch. Omit the
 # whole block to disable derivation.
 # gpa_derive:
-#   endpoint: "http://<reference-node>:8899"
+#   endpoint: "${REFERENCE_RPC_URL}"
 #   interval: "5m"
 #   min_accounts: 5     # floor: a closing account can't empty the result set
 #   max_accounts: 200   # cap: bounded result sizes, comparable latency

@@ -217,9 +217,11 @@ so we fix the setup, not the numbers.
 
 ## Deployment
 
-The Solana Foundation runs the monitor on Google Cloud — one lightweight container per region — so
-latency is measured from where traders actually are. The fleet spans seven regions across North
-America, Europe, and Asia:
+The full deployment — terraform for the cloud fleets, ansible for bare metal, the deploy
+workflow, alert rules, and the fleet runtime config — lives in this repo under
+[`deploy/`](./deploy/README.md), so operations are as auditable as the methodology. The
+Solana Foundation runs the monitor across four infrastructures (GCP, AWS, and two bare-metal
+providers); the original GCP fleet spans seven regions across North America, Europe, and Asia:
 
 | Region | Location |
 | --- | --- |
