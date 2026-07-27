@@ -4,6 +4,7 @@ monitor_src_dir: "{{ ansible_user_dir }}/rpc-latency-monitor-src"
 monitor_bin: "/usr/local/bin/rpc-latency-monitor"
 
 alloy_version: "v1.17.1"
+alloy_sha256: "b92bfa2815a0a2c51477b4965d1ace3bf2ffc7b841e1361bd4cda6069e8c65bd"
 alloy_bin: "/usr/local/bin/alloy"
 doppler_version: "3.76.1"
 doppler_sha256: "e35230bd21fdbd7e41ddcb24672ec61cecefdb22de244d0216ea6b59853f63f2"

@@ -93,6 +93,7 @@
   ansible.builtin.get_url:
     url: "https://github.com/grafana/alloy/releases/download/{{ alloy_version }}/alloy-linux-amd64.zip"
     dest: "/tmp/alloy-{{ alloy_version }}.zip"
+    checksum: "sha256:{{ alloy_sha256 }}"
     mode: "0644"
   when: (alloy_version | regex_replace('^v', '')) not in (alloy_installed.stdout | default(''))
 
