@@ -1,0 +1,72 @@
+region: us-east4
+
+server:
+  bind: "127.0.0.1:9464"
+
+reference_slot:
+  source: endpoint
+  endpoint: "${REFERENCE_RPC_URL}"
+  poll_interval: "1s"
+
+reference_check:
+  rpc_url: "${REFERENCE_RPC_URL}"
+  interval: "5m"
+
+gpa_derive:
+  endpoint: "${REFERENCE_RPC_URL}"
+
+providers:
+  - name: helius
+    url: "https://beta.helius-rpc.com/?api-key=${HELIUS_API_KEY}"
+  - name: triton
+    url: "https://${TRITON_HOST}/${TRITON_TOKEN}"
+  - name: quicknode
+    url: "${QUICKNODE_URL}"
+  - name: alchemy
+    url: "${ALCHEMY_URL}"
+
+checks:
+  - method: get_health
+    interval: "60s"
+    jitter: "5s"
+  - method: get_slot
+    interval: "60s"
+    jitter: "5s"
+  - method: get_latest_blockhash
+    interval: "60s"
+    jitter: "5s"
+  - method: get_account_info
+    interval: "60s"
+    jitter: "5s"
+  - method: get_multiple_accounts
+    interval: "60s"
+    jitter: "5s"
+  - method: get_program_accounts
+    interval: "60s"
+    jitter: "5s"
+    timeout: "30s"
+  - method: get_token_accounts_by_owner
+    interval: "60s"
+    jitter: "5s"
+  - method: get_block_recent
+    interval: "60s"
+    jitter: "5s"
+  - method: get_transaction_recent
+    interval: "60s"
+    jitter: "5s"
+  - method: get_signatures_for_address
+    interval: "60s"
+    jitter: "5s"
+
+request_timeout: "10s"
+archival_interval: "30s"
+archival_timeout: "30s"
+
+gpa_targets:
+  - name: token_owner
+    program: TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA
+    data_size: 165
+    memcmp: [{ offset: 32, bytes: "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM" }]
+  - name: vote_accounts
+    program: Vote111111111111111111111111111111111111111
+    data_size: 3762

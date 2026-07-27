@@ -1,0 +1,13 @@
+project_id    = "your-gcp-project-id"
+monitor_image = "us-east4-docker.pkg.dev/your-gcp-project-id/rpc-latency-monitor/rpc-latency-monitor:<git-sha>"
+doppler_token = "dp.st.xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+
+locations = {
+  "us-east4"        = "us-east4-b"      # us-east (Ashburn)
+  "us-west2"        = "us-west2-b"      # us-west (Los Angeles)
+  "europe-west2"    = "europe-west2-b"  # eu-west (London)
+  "europe-west3"    = "europe-west3-b"  # eu-east (Frankfurt)
+  "europe-west4"    = "europe-west4-a"  # Amsterdam (Netherlands / AMS-IX)
+  "asia-northeast1" = "asia-northeast1-b" # Tokyo
+  "asia-southeast1" = "asia-southeast1-b" # Singapore
+}

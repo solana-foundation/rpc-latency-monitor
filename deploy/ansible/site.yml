@@ -1,0 +1,5 @@
+- name: Deploy rpc-latency-monitor to bare-metal hosts
+  hosts: tsw:latitude
+  gather_facts: true
+  roles:
+    - monitor

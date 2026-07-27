@@ -19,6 +19,9 @@ Cargo.lock.orig
 !*.tfvars.example
 crash.log
 
+deploy/ansible/inventory/*.yml
+deploy/ansible/known_hosts
+
 # Editor / OS
 .DS_Store
 .idea/

@@ -24,11 +24,18 @@ async fn main() -> anyhow::Result<()> {
     init_tracing();
 
     let args = Args::parse();
-    let config = Config::load(&args.config)?;
+    let mut config = Config::load(&args.config)?;
     let endpoints = providers::resolve_endpoints(&config.providers)?;
     let mut gpa_derive = config.gpa_derive.clone();
     if let Some(derive) = gpa_derive.as_mut() {
         derive.endpoint = providers::resolve_url("gpa_derive.endpoint", &derive.endpoint)?;
+    }
+    if let Some(endpoint) = config.reference_slot.endpoint.as_mut() {
+        *endpoint = providers::resolve_url("reference_slot.endpoint", endpoint)?;
+    }
+    if !config.reference_check.rpc_url.is_empty() {
+        config.reference_check.rpc_url =
+            providers::resolve_url("reference_check.rpc_url", &config.reference_check.rpc_url)?;
     }
 
     let metrics = Metrics::new(&config.region, geo::geo_for(&config.region))?;

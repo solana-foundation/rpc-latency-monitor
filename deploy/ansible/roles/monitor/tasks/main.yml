@@ -1,0 +1,213 @@
+- name: Assert required vars
+  ansible.builtin.assert:
+    that:
+      - monitor_ref is defined and monitor_ref | length > 0
+      - doppler_token is defined and doppler_token | length > 0
+      - monitor_region is defined and monitor_region | length > 0
+      - monitor_infra is defined and monitor_infra | length > 0
+    quiet: true
+
+- name: Create service user
+  ansible.builtin.user:
+    name: "{{ run_user }}"
+    system: true
+    shell: /usr/sbin/nologin
+    create_home: false
+  become: true
+
+- name: Create config + data dirs
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: "{{ run_user }}"
+    mode: "0750"
+  loop:
+    - "{{ conf_dir }}"
+    - "{{ data_dir }}"
+  become: true
+
+- name: Alloy storage dir (owned by service user)
+  ansible.builtin.file:
+    path: "{{ data_dir }}/alloy"
+    state: directory
+    owner: "{{ run_user }}"
+    group: "{{ run_user }}"
+    mode: "0750"
+  become: true
+
+- name: Install build dependencies
+  ansible.builtin.apt:
+    name: "{{ apt_build_deps }}"
+    update_cache: true
+    cache_valid_time: 86400
+    state: present
+  become: true
+
+- name: Install rustup (non-interactive, minimal)
+  ansible.builtin.shell: |
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+  args:
+    creates: "{{ ansible_user_dir }}/.cargo/bin/cargo"
+
+- name: Fetch monitor source at the pinned ref
+  ansible.builtin.git:
+    repo: "{{ monitor_repo }}"
+    dest: "{{ monitor_src_dir }}"
+    version: "{{ monitor_ref }}"
+
+- name: Build monitor (release, locked)
+  ansible.builtin.shell: |
+    source ~/.cargo/env && cargo build --release --locked
+  args:
+    chdir: "{{ monitor_src_dir }}"
+    executable: /bin/bash
+  register: cargo_build
+  changed_when: "'Compiling' in cargo_build.stderr"
+
+- name: Compare built binary with installed
+  ansible.builtin.command: "cmp -s {{ monitor_src_dir }}/target/release/rpc-latency-monitor {{ monitor_bin }}"
+  register: bin_cmp
+  failed_when: false
+  changed_when: bin_cmp.rc != 0
+
+- name: Install monitor binary
+  ansible.builtin.copy:
+    src: "{{ monitor_src_dir }}/target/release/rpc-latency-monitor"
+    dest: "{{ monitor_bin }}"
+    remote_src: true
+    owner: root
+    group: root
+    mode: "0755"
+  when: bin_cmp.changed
+  become: true
+  notify: restart rpc-monitor
+
+- name: Check installed alloy version
+  ansible.builtin.command: "{{ alloy_bin }} --version"
+  register: alloy_installed
+  failed_when: false
+  changed_when: false
+
+- name: Download alloy {{ alloy_version }}
+  ansible.builtin.get_url:
+    url: "https://github.com/grafana/alloy/releases/download/{{ alloy_version }}/alloy-linux-amd64.zip"
+    dest: "/tmp/alloy-{{ alloy_version }}.zip"
+    checksum: "sha256:{{ alloy_sha256 }}"
+    mode: "0644"
+  when: (alloy_version | regex_replace('^v', '')) not in (alloy_installed.stdout | default(''))
+
+- name: Extract alloy
+  ansible.builtin.unarchive:
+    src: "/tmp/alloy-{{ alloy_version }}.zip"
+    dest: /tmp
+    remote_src: true
+  when: (alloy_version | regex_replace('^v', '')) not in (alloy_installed.stdout | default(''))
+
+- name: Install alloy binary
+  ansible.builtin.copy:
+    src: /tmp/alloy-linux-amd64
+    dest: "{{ alloy_bin }}"
+    remote_src: true
+    owner: root
+    group: root
+    mode: "0755"
+  when: (alloy_version | regex_replace('^v', '')) not in (alloy_installed.stdout | default(''))
+  become: true
+  notify: restart alloy
+
+- name: Check installed doppler version
+  ansible.builtin.command: /usr/local/bin/doppler --version
+  register: doppler_installed
+  changed_when: false
+  failed_when: false
+
+- name: Download doppler CLI (pinned version + checksum)
+  ansible.builtin.get_url:
+    url: "https://github.com/DopplerHQ/cli/releases/download/{{ doppler_version }}/doppler_{{ doppler_version }}_linux_amd64.tar.gz"
+    dest: /tmp/doppler.tar.gz
+    checksum: "sha256:{{ doppler_sha256 }}"
+    mode: "0644"
+  when: doppler_version not in (doppler_installed.stdout | default(''))
+
+- name: Install doppler CLI
+  ansible.builtin.unarchive:
+    src: /tmp/doppler.tar.gz
+    dest: /usr/local/bin
+    include: [doppler]
+    remote_src: true
+    owner: root
+    group: root
+    mode: "0755"
+  when: doppler_version not in (doppler_installed.stdout | default(''))
+  become: true
+
+- name: Download secrets
+  ansible.builtin.command: doppler secrets download --no-file --format docker
+  environment:
+    DOPPLER_TOKEN: "{{ doppler_token }}"
+    DOPPLER_PROJECT: rpc-latency-monitor
+    DOPPLER_CONFIG: prd
+  register: doppler_secrets
+  changed_when: false
+  no_log: true
+
+- name: Write env file
+  ansible.builtin.copy:
+    content: "{{ doppler_secrets.stdout }}\n"
+    dest: "{{ env_file }}"
+    owner: root
+    group: "{{ run_user }}"
+    mode: "0640"
+  no_log: true
+  become: true
+  notify:
+    - restart rpc-monitor
+    - restart alloy
+
+- name: Install monitor config
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../gcp/config.yaml"
+    dest: "{{ conf_dir }}/config.yaml"
+    owner: root
+    group: "{{ run_user }}"
+    mode: "0640"
+  become: true
+  notify: restart rpc-monitor
+
+- name: Install alloy config
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../../grafana/alloy-config.alloy"
+    dest: "{{ conf_dir }}/config.alloy"
+    owner: root
+    group: "{{ run_user }}"
+    mode: "0640"
+  become: true
+  notify: restart alloy
+
+- name: Install rpc-monitor unit
+  ansible.builtin.template:
+    src: rpc-monitor.service.j2
+    dest: /etc/systemd/system/rpc-monitor.service
+    mode: "0644"
+  become: true
+  notify: restart rpc-monitor
+
+- name: Install alloy unit
+  ansible.builtin.template:
+    src: alloy.service.j2
+    dest: /etc/systemd/system/alloy.service
+    mode: "0644"
+  become: true
+  notify: restart alloy
+
+- name: Enable + start services
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    enabled: true
+    state: started
+    daemon_reload: true
+  loop:
+    - rpc-monitor
+    - alloy
+  become: true

@@ -7,6 +7,8 @@ prometheus.scrape "rpc_latency_monitor" {
 }
 
 prometheus.remote_write "grafana_cloud" {
+  external_labels = { infra = coalesce(sys.env("MONITOR_INFRA"), "gcp") }
+
   endpoint {
     url = sys.env("GRAFANA_CLOUD_PROM_URL")
 
