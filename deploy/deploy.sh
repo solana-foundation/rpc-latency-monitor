@@ -23,13 +23,6 @@ run_aws() {
 
 run_metal() {
   local group="$1"
-  local count
-  count=$( (cd "$ROOT/ansible" && ansible "$group" --list-hosts 2>/dev/null) \
-    | sed -n 's/.*hosts (\([0-9]*\)).*/\1/p' )
-  if [ "${count:-0}" = "0" ]; then
-    echo "note: ${group} inventory has no hosts — nothing deployed"
-    return 0
-  fi
   if ! compgen -G "$HOME/.ssh/id_*" >/dev/null 2>&1; then
     echo "warning: no SSH key at ~/.ssh/id_* on this runner — bare-metal (${group}) SSH auth will fail" >&2
   fi
