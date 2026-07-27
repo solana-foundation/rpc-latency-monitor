@@ -209,19 +209,27 @@ fn rotated_target(
     method: RpcMethod,
     rotation: usize,
 ) -> Option<GpaTarget> {
-    if method != RpcMethod::GetProgramAccounts {
-        return None;
+    match method {
+        RpcMethod::GetProgramAccounts => {
+            let total = targets.len() + derived.len();
+            if total == 0 {
+                return None;
+            }
+            let index = rotation % total;
+            Some(if index < targets.len() {
+                targets[index].clone()
+            } else {
+                derived[index - targets.len()].clone()
+            })
+        }
+        RpcMethod::GetTokenAccountsByOwner => {
+            let owner = derived
+                .iter()
+                .find(|t| t.name == gpa_derive::BY_OWNER_NAME)?;
+            (rotation % 2 == 1).then(|| owner.clone())
+        }
+        _ => None,
     }
-    let total = targets.len() + derived.len();
-    if total == 0 {
-        return None;
-    }
-    let index = rotation % total;
-    Some(if index < targets.len() {
-        targets[index].clone()
-    } else {
-        derived[index - targets.len()].clone()
-    })
 }
 
 #[cfg(test)]
@@ -286,6 +294,33 @@ mod tests {
             })
             .collect();
         assert_eq!(only_derived, vec!["derived_x", "derived_y"]);
+    }
+
+    #[test]
+    fn gtabo_alternates_builtin_and_derived_owner() {
+        let derived = vec![
+            GpaTarget {
+                name: gpa_derive::BY_MINT_NAME.to_owned(),
+                program: "prog".to_owned(),
+                data_size: Some(1),
+                memcmp: Vec::new(),
+            },
+            GpaTarget {
+                name: gpa_derive::BY_OWNER_NAME.to_owned(),
+                program: "prog".to_owned(),
+                data_size: Some(1),
+                memcmp: Vec::new(),
+            },
+        ];
+        let method = RpcMethod::GetTokenAccountsByOwner;
+        assert!(rotated_target(&[], &derived, method, 0).is_none());
+        assert_eq!(
+            rotated_target(&[], &derived, method, 1).unwrap().name,
+            gpa_derive::BY_OWNER_NAME
+        );
+        assert!(rotated_target(&[], &derived, method, 2).is_none());
+        assert!(rotated_target(&[], &[], method, 1).is_none());
+        assert!(rotated_target(&[], &derived[..1], method, 1).is_none());
     }
 
     #[test]

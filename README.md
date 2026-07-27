@@ -154,11 +154,11 @@ to either the config value or the raw JSON-RPC name:
 | `get_account_info` | `getAccountInfo` | `getAccountInfo` | A real account rotated from recently observed blocks (falls back to a known account); validated well-formed (a live target may since have closed). |
 | `get_multiple_accounts` | `getMultipleAccounts` | `getMultipleAccounts` | A batch of accounts from recent blocks — a core trading fast-path read. |
 | `get_program_accounts` | `getProgramAccounts` | `getProgramAccounts` | Rotates round-robin through the configured `gpa_targets` (real heavy query shapes: owner scans, stake-by-authority, pool enumeration by `dataSize`, holders-by-mint), **returning real account data** (no zero-length `dataSlice`). Metrics carry a `target` label with the target's name. |
-| `get_token_accounts_by_owner` | `getTokenAccountsByOwner` | `getTokenAccountsByOwner` | All token accounts for an owner with a large, stable set. |
+| `get_token_accounts_by_owner` | `getTokenAccountsByOwner` | `getTokenAccountsByOwner` | All token accounts for an owner with a large, stable set. With `gpa_derive` enabled, alternates with a freshly derived owner (`target="derived_token_by_owner"`) so the query can't be special-cased. |
 | `get_block_recent` | `getBlock` | `getBlock_recent` | A recent block a fixed depth behind the tip, **`transactionDetails: full`** (a real block fetch); also seeds the live account pool. |
 | `get_block_archival` | `getBlock` | `getBlock_archival` | A full block ~40M slots back, retained only by archival nodes (non-archival tiers correctly error). Driven by the coordinated archival round (below), not a per-provider loop: every provider is asked the **same random, never-repeated** old slot so latency is comparable and blockhashes can be cross-checked. |
 | `get_transaction_recent` | `getTransaction` | `getTransaction_recent` | A signature freshly discovered by `get_signatures_for_address`. |
-| `get_signatures_for_address` | `getSignaturesForAddress` | `getSignaturesForAddress` | A permanently busy address at `confirmed`, `limit` 1000 (a full page, not just the head). |
+| `get_signatures_for_address` | `getSignaturesForAddress` | `getSignaturesForAddress` | A permanently busy address at `confirmed`, `limit` 1000 (a full page, not just the head). The head signature's slot is the response's observed slot, so a cached page scores `stale`. |
 
 ### Regions
 
