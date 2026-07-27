@@ -7,9 +7,6 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROVIDER="${PROVIDER:-${1:-all}}"
 TARGET="${TARGET:-all}"
-
-# Alerts live only in the GCP deploy path; TARGET=alerts must not roll any
-# fleet, whatever PROVIDER says.
 if [ "$TARGET" = "alerts" ]; then
   PROVIDER=gcp
 fi

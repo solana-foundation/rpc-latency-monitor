@@ -14,13 +14,6 @@ LIMIT="${LIMIT:-}"
 
 echo "deploying ref: $IMAGE_SHA"
 
-# Inventories carry the bare-metal box IPs (SSH targets) and are not committed
-# to this public repo. They are materialized from Doppler at deploy time:
-# INVENTORY_LATITUDE_B64 / INVENTORY_TSW_B64 = base64 of the inventory YAML
-# (see inventory/example.yml.tmpl for the shape). Doppler is authoritative:
-# when the env var is set it always overwrites, so updates (new boxes, rotated
-# keys) land on the next deploy even on a persistent runner. A hand-written
-# local file is only used when the env var is absent (local runs).
 materialize() {
   local var="$1" file="$SCRIPT_DIR/$2"
   local value="${!var:-}"
@@ -35,9 +28,6 @@ materialize() {
 materialize INVENTORY_LATITUDE_B64 inventory/latitude.yml
 materialize INVENTORY_TSW_B64 inventory/teraswitch.yml
 
-# Host keys (base64 of an ssh known_hosts covering every inventory host) back
-# the strict host-key check in ansible.cfg. Refreshed in Doppler by
-# ssh-keyscan whenever a box is provisioned or reinstalled.
 materialize KNOWN_HOSTS_B64 known_hosts
 if [ ! -f "$SCRIPT_DIR/known_hosts" ]; then
   echo "error: no known_hosts — set KNOWN_HOSTS_B64 (strict host-key checking needs it)" >&2

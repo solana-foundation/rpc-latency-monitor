@@ -66,7 +66,7 @@ reference_slot:
 # (this round owns them).
 # claim_checks: false
 # reference_check:
-#   rpc_url: "${REFERENCE_RPC_URL}"   # ${ENV_VAR} placeholders resolve at startup
+#   rpc_url: "${REFERENCE_RPC_URL}"
 #   exclude_provider: helius   # don't judge the reference against itself
 #   interval: "5m"
 #   depth: 64                  # checked slot = reference finalized tip - depth

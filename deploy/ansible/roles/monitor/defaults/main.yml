@@ -6,8 +6,6 @@ monitor_bin: "/usr/local/bin/rpc-latency-monitor"
 # Pinned to match the docker fleets' alloy (grafana/alloy:v1.17.1).
 alloy_version: "v1.17.1"
 alloy_bin: "/usr/local/bin/alloy"
-
-# Doppler CLI, pinned by version + release checksum (no curl|sh installers).
 doppler_version: "3.76.1"
 doppler_sha256: "e35230bd21fdbd7e41ddcb24672ec61cecefdb22de244d0216ea6b59853f63f2"
 

@@ -40,8 +40,6 @@ jobs:
     environment: prod
     env:
       TARGET: ${{ github.event.inputs.target || 'all' }}
-      # Alerts live only in the GCP deploy path; an alerts-only run must not
-      # touch (or authenticate to) any other provider.
       PROVIDER: ${{ github.event.inputs.target == 'alerts' && 'gcp' || github.event.inputs.provider || 'all' }}
       DOPPLER_PROJECT: rpc-latency-monitor
       DOPPLER_CONFIG: prd
@@ -100,10 +98,6 @@ jobs:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           COMMIT_MSG=$(git log -1 --format=%s "$SHA" 2>/dev/null | cut -c1-140 || echo "")
-
-          # Build the shared Slack payload `fields` block once via jq; each
-          # notification step prepends a marker text. jq handles all JSON
-          # escaping (backslashes, quotes, control chars) safely.
           FIELDS=$(jq -n \
             --arg target     "$TARGET" \
             --arg scope      "$PROVIDER" \

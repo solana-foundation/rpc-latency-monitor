@@ -19,7 +19,6 @@ Cargo.lock.orig
 !*.tfvars.example
 crash.log
 
-# Bare-metal inventories hold box IPs; materialized from Doppler at deploy time
 deploy/ansible/inventory/*.yml
 !deploy/ansible/inventory/example.yml.tmpl
 deploy/ansible/known_hosts

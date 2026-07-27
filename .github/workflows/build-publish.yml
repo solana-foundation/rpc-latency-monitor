@@ -79,5 +79,3 @@ jobs:
             echo "pushed dashboard $(basename "$f")"
           done
 
-      # Deploy is triggered natively: .github/workflows/deploy.yml runs on
-      # workflow_run when this workflow completes successfully on main.
