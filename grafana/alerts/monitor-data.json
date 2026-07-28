@@ -94,8 +94,8 @@
             "service": "rpc-latency-monitor"
           },
           "annotations": {
-            "summary": "{{ $labels.provider }} \u00b7 {{ $labels.error_kind }} \u00b7 {{ $labels.method }} \u00b7 {{ $labels.region }}",
-            "description": "{{ $labels.provider }} returned {{ $labels.error_kind }} for {{ $labels.method }} from {{ $labels.region }} on >5% of requests over 10m. Excluded from the latency and win % panels. Usually the provider is rate/compute-limiting our key for this method \u2014 raise the plan per-key limit or use a dedicated key.",
+            "summary": "{{ $labels.provider }} · {{ $labels.error_kind }} · {{ $labels.method }} · {{ $labels.region }}",
+            "description": "{{ $labels.provider }} returned {{ $labels.error_kind }} for {{ $labels.method }} from {{ $labels.region }} on >5% of requests over 10m. Excluded from the latency and win % panels. Usually the provider is rate/compute-limiting our key for this method — raise the plan per-key limit or use a dedicated key.",
             "runbook": "Confirm via rpc_requests_total by provider, method, region, error_kind. http_429 = rate/CU cap on our key; other 4xx = bad request params for that method."
           },
           "data": [
@@ -170,7 +170,7 @@
           },
           "annotations": {
             "summary": "{{ $labels.provider }} served data that failed claim verification in the last hour",
-            "description": "Claim verification (anti-gaming layer 2) recorded mismatch or implausible verdicts for this provider: content it served (blockhash / accounts / transaction / clock) did not match the reference node, or claimed a slot ahead of physics. Honest on-chain movement is scored 'drift', a lagging reference node is 'skipped' - neither fires this alert. Investigate before drawing conclusions; this is an internal signal, not a public accusation. Breakdown: rpc_claim_check_total{provider, method, target, result}.",
+            "description": "Claim verification (anti-gaming layer 2) recorded mismatch verdicts for this provider: content it served (blockhash / accounts / transaction / clock) did not match the reference node. Honest on-chain movement is scored 'drift', a lagging reference node is 'skipped' - neither fires this alert. Investigate before drawing conclusions; this is an internal signal, not a public accusation. Breakdown: rpc_claim_check_total{provider, method, target, result}.",
             "runbook": "Break down by rpc_claim_check_total{provider, method, target, result} to find which method/target mismatched. Cross-check the reference node's health (rpc_reference_node_lag, pillar alerts) first; then manually replay the claim against the provider and the node before treating it as provider dishonesty. Do not communicate externally without a second confirmed sample."
           },
           "data": [
@@ -187,7 +187,7 @@
                   "type": "prometheus",
                   "uid": "${GRAFANA_DATASOURCE_UID}"
                 },
-                "expr": "sum by (provider) (increase(rpc_claim_check_total{result=~\"mismatch|implausible\"}[1h]))",
+                "expr": "sum by (provider) (increase(rpc_claim_check_total{result=\"mismatch\"}[1h]))",
                 "instant": true,
                 "intervalMs": 1000,
                 "maxDataPoints": 43200
@@ -225,6 +225,94 @@
                       "type": "gt",
                       "params": [
                         0.5
+                      ]
+                    },
+                    "operator": {
+                      "type": "and"
+                    },
+                    "query": {
+                      "params": [
+                        "C"
+                      ]
+                    },
+                    "reducer": {
+                      "type": "last",
+                      "params": []
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "uid": "rpc-claim-implausible",
+          "title": "Provider claiming slots ahead of physics (anti-gaming)",
+          "condition": "C",
+          "for": "0s",
+          "noDataState": "OK",
+          "execErrState": "Error",
+          "labels": {
+            "severity": "warning",
+            "service": "rpc-latency-monitor"
+          },
+          "annotations": {
+            "summary": "{{ $labels.provider }} repeatedly claimed slots ahead of physics in the last hour",
+            "description": "More than 5 implausible verdicts in an hour: the provider kept claiming slots ahead of the reference node tip + margin. Single-digit counts are suppressed - brief reference-node lag near the margin produces a benign trickle (~3 seen 2026-07-28). A sustained stream is either real gaming or a stuck reference tip; check rpc_reference_node_lag first.",
+            "runbook": "Break down by rpc_claim_check_total{provider, method, target, result} to find which method/target mismatched. Cross-check the reference node's health (rpc_reference_node_lag, pillar alerts) first; then manually replay the claim against the provider and the node before treating it as provider dishonesty. Do not communicate externally without a second confirmed sample."
+          },
+          "data": [
+            {
+              "refId": "A",
+              "relativeTimeRange": {
+                "from": 3600,
+                "to": 0
+              },
+              "datasourceUid": "${GRAFANA_DATASOURCE_UID}",
+              "model": {
+                "refId": "A",
+                "datasource": {
+                  "type": "prometheus",
+                  "uid": "${GRAFANA_DATASOURCE_UID}"
+                },
+                "expr": "sum by (provider) (increase(rpc_claim_check_total{result=\"implausible\"}[1h]))",
+                "instant": true,
+                "intervalMs": 1000,
+                "maxDataPoints": 43200
+              }
+            },
+            {
+              "refId": "B",
+              "datasourceUid": "__expr__",
+              "model": {
+                "refId": "B",
+                "type": "reduce",
+                "datasource": {
+                  "type": "__expr__",
+                  "uid": "__expr__"
+                },
+                "expression": "A",
+                "reducer": "last"
+              }
+            },
+            {
+              "refId": "C",
+              "datasourceUid": "__expr__",
+              "model": {
+                "refId": "C",
+                "type": "threshold",
+                "datasource": {
+                  "type": "__expr__",
+                  "uid": "__expr__"
+                },
+                "expression": "B",
+                "conditions": [
+                  {
+                    "type": "query",
+                    "evaluator": {
+                      "type": "gt",
+                      "params": [
+                        5
                       ]
                     },
                     "operator": {
