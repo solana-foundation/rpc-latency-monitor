@@ -19,6 +19,7 @@ materialize() {
     [ -f "$file" ] && echo "note: $2 not in $var — using existing local file"
     return 0
   fi
+  mkdir -p "$(dirname "$file")"
   echo "$value" | base64 -d >"$file"
   chmod 600 "$file"
   echo "materialized $2 from $var"
