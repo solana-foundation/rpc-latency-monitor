@@ -27,6 +27,15 @@ materialize INVENTORY_LATITUDE_B64 inventory/latitude.yml
 materialize INVENTORY_TSW_B64 inventory/teraswitch.yml
 materialize KNOWN_HOSTS_B64 known_hosts
 
+if [ -n "$LIMIT" ]; then
+  count=$( (cd "$SCRIPT_DIR" && ansible "$LIMIT" --list-hosts 2>/dev/null) \
+    | sed -n 's/.*hosts (\([0-9]*\)).*/\1/p' )
+  if [ "${count:-0}" = "0" ]; then
+    echo "note: ${LIMIT} has no inventory hosts — nothing deployed"
+    exit 0
+  fi
+fi
+
 VARS_FILE="$(mktemp)"
 chmod 600 "$VARS_FILE"
 trap 'rm -f "$VARS_FILE"' EXIT
