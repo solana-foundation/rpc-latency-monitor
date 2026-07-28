@@ -442,7 +442,8 @@ impl ClaimSink {
             .as_ref()
             .and_then(ClaimPayload::slot)
             .or(result.observed_slot);
-        let slot_implausible = !self.node_stale()
+        let node_caught_up = self.node_lag().is_some_and(|lag| lag <= self.margin);
+        let slot_implausible = node_caught_up
             && matches!(
                 (self.node_tip(), claim_slot),
                 (Some(tip), Some(slot)) if slot > tip.saturating_add(self.margin)
@@ -876,6 +877,21 @@ mod tests {
             "helius",
             RpcMethod::GetSlot,
             &success_result(None, Some(1990)),
+        );
+        assert!(sink.queue.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn catching_up_node_suppresses_implausibility() {
+        let fleet = ReferenceSlot::new();
+        fleet.observe(2000);
+        let sink = ClaimSink::new(16, 64, fleet);
+        sink.set_node_tip(1950);
+        assert!(!sink.node_stale());
+        sink.submit(
+            "honest",
+            RpcMethod::GetSlot,
+            &success_result(None, Some(2000)),
         );
         assert!(sink.queue.lock().unwrap().is_empty());
     }
