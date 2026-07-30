@@ -1,6 +1,8 @@
 pub mod methods;
 
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use reqwest::header::{HeaderMap, HeaderValue, CACHE_CONTROL, PRAGMA};
@@ -159,24 +161,49 @@ impl ErrorKind {
     }
 }
 
+const LARGE_BODY_BYTES: usize = 128 * 1024;
+
 pub struct RpcClient {
-    http: reqwest::Client,
+    timeout: Duration,
+    fallback: reqwest::Client,
+    clients: Mutex<HashMap<(String, String), reqwest::Client>>,
     next_id: AtomicU64,
 }
 
 impl RpcClient {
     pub fn new(request_timeout: Duration) -> reqwest::Result<Self> {
+        let fallback = Self::build_client(request_timeout)?;
+        Ok(Self {
+            timeout: request_timeout,
+            fallback,
+            clients: Mutex::new(HashMap::new()),
+            next_id: AtomicU64::new(1),
+        })
+    }
+
+    fn build_client(request_timeout: Duration) -> reqwest::Result<reqwest::Client> {
         let mut headers = HeaderMap::new();
         headers.insert(CACHE_CONTROL, HeaderValue::from_static("no-cache"));
         headers.insert(PRAGMA, HeaderValue::from_static("no-cache"));
-        let http = reqwest::Client::builder()
+        reqwest::Client::builder()
             .timeout(request_timeout)
             .default_headers(headers)
-            .build()?;
-        Ok(Self {
-            http,
-            next_id: AtomicU64::new(1),
-        })
+            .tcp_nodelay(true)
+            .build()
+    }
+
+    // Dedicated connection pool per (endpoint, method) so a slow-draining
+    // getProgramAccounts response can never head-of-line block another
+    // check's request on a shared HTTP/2 connection or pooled socket.
+    fn client_for(&self, url: &str, method: &str) -> reqwest::Client {
+        let key = (url.to_owned(), method.to_owned());
+        let mut clients = self.clients.lock().unwrap();
+        if let Some(client) = clients.get(&key) {
+            return client.clone();
+        }
+        let client = Self::build_client(self.timeout).unwrap_or_else(|_| self.fallback.clone());
+        clients.insert(key, client.clone());
+        client
     }
 
     pub async fn raw_call(&self, url: &str, method: &str, params: Value) -> Option<Value> {
@@ -193,14 +220,26 @@ impl RpcClient {
             "method": method,
             "params": params,
         });
-        let Ok(response) = self.http.post(url).json(&body).send().await else {
+        let http = self.client_for(url, method);
+        let Ok(response) = http.post(url).json(&body).send().await else {
             return RawResponse::Unavailable;
         };
         if !response.status().is_success() {
             return RawResponse::Unavailable;
         }
-        let Ok(json) = response.json::<Value>().await else {
+        let Ok(bytes) = response.bytes().await else {
             return RawResponse::Unavailable;
+        };
+        let json: Value = if bytes.len() >= LARGE_BODY_BYTES {
+            match tokio::task::spawn_blocking(move || serde_json::from_slice(&bytes)).await {
+                Ok(Ok(json)) => json,
+                _ => return RawResponse::Unavailable,
+            }
+        } else {
+            match serde_json::from_slice(&bytes) {
+                Ok(json) => json,
+                Err(_) => return RawResponse::Unavailable,
+            }
         };
         if let Some(error) = json.get("error") {
             let code = error.get("code").and_then(Value::as_i64).unwrap_or(0);
@@ -227,7 +266,8 @@ impl RpcClient {
             "params": params,
         });
 
-        let mut request = self.http.post(url).json(&body);
+        let http = self.client_for(url, method.rpc_name());
+        let mut request = http.post(url).json(&body);
         if let Some(timeout) = timeout {
             request = request.timeout(timeout);
         }
@@ -251,7 +291,19 @@ impl RpcClient {
         let body = response.bytes().await;
         let latency = start.elapsed();
 
+        // Parsing happens after the clock stops, but a multi-megabyte body
+        // parsed inline would still stall this runtime worker and delay the
+        // timing wakeups of other in-flight checks on small hosts.
         let parsed = match body {
+            Ok(bytes) if bytes.len() >= LARGE_BODY_BYTES => {
+                let ctx = ctx.clone();
+                match tokio::task::spawn_blocking(move || classify(http_status, &bytes, method, &ctx))
+                    .await
+                {
+                    Ok(parsed) => parsed,
+                    Err(_) => Parsed::error(ErrorKind::Transport),
+                }
+            }
             Ok(bytes) => classify(http_status, &bytes, method, ctx),
             Err(_) => Parsed::error(ErrorKind::Transport),
         };
