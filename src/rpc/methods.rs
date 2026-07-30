@@ -166,7 +166,7 @@ impl RpcMethod {
                 };
                 let Some(slots) = entries
                     .iter()
-                    .map(|e| e.get("slot")?.as_u64())
+                    .map(|e| non_empty_str(e.get("signature")).then(|| e.get("slot")?.as_u64())?)
                     .collect::<Option<Vec<u64>>>()
                 else {
                     return false;
@@ -672,6 +672,11 @@ mod tests {
         assert!(!RpcMethod::GetSignaturesForAddress.is_valid_result(&newer, &ctx));
         assert!(!RpcMethod::GetSignaturesForAddress.is_valid_result(&smuggled, &ctx));
         assert!(!RpcMethod::GetSignaturesForAddress.is_valid_result(&json!([]), &ctx));
+
+        let unsigned = json!([{ "slot": 122 }]);
+        let blank_sig = json!([{ "signature": "", "slot": 122 }]);
+        assert!(!RpcMethod::GetSignaturesForAddress.is_valid_result(&unsigned, &ctx));
+        assert!(!RpcMethod::GetSignaturesForAddress.is_valid_result(&blank_sig, &ctx));
     }
 
     #[test]
