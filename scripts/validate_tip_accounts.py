@@ -109,20 +109,28 @@ def main() -> int:
         errors.append("accounts must be sorted by (provider, address) to keep diffs reviewable")
 
     if args.base:
-        base_addrs = {e["address"] for e in load_entries(args.base)}
-        new = [e for e in entries if isinstance(e, dict) and e.get("address") not in base_addrs]
-        print(f"{len(new)} new entr{'y' if len(new) == 1 else 'ies'} vs base")
+        base_entries = [e for e in load_entries(args.base) if isinstance(e, dict)]
+        base_addrs = {e.get("address") for e in base_entries}
+        base_claims = {(e.get("address"), e.get("provider")) for e in base_entries}
+        new = [
+            e for e in entries
+            if isinstance(e, dict) and (e.get("address"), e.get("provider")) not in base_claims
+        ]
+        print(f"{len(new)} new or reassigned entr{'y' if len(new) == 1 else 'ies'} vs base")
         for e in new:
             if "signature" not in e:
+                kind = "REASSIGNED" if e["address"] in base_addrs else "UNSIGNED new"
                 warnings.append(
-                    f"UNSIGNED new entry {e['address']} ({e['provider']}) — "
+                    f"{kind} entry {e['address']} ({e['provider']}) without signature — "
                     "maintainer must verify ownership (treasury sweep linkage) before merge"
                 )
+            if e["address"] in base_addrs:
+                continue
             try:
                 if not has_onchain_history(e["address"], args.rpc):
                     errors.append(f"new entry {e['address']} has no on-chain history")
             except Exception as exc:
-                warnings.append(f"could not check on-chain history for {e['address']}: {exc}")
+                errors.append(f"could not check on-chain history for {e['address']}: {exc}")
 
     for w in warnings:
         print(f"WARNING: {w}")
