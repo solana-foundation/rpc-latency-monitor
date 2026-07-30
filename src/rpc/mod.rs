@@ -166,7 +166,7 @@ const LARGE_BODY_BYTES: usize = 128 * 1024;
 pub struct RpcClient {
     timeout: Duration,
     fallback: reqwest::Client,
-    clients: Mutex<HashMap<(String, String), reqwest::Client>>,
+    clients: Mutex<HashMap<String, reqwest::Client>>,
     next_id: AtomicU64,
 }
 
@@ -189,17 +189,17 @@ impl RpcClient {
             .timeout(request_timeout)
             .default_headers(headers)
             .tcp_nodelay(true)
+            .http1_only()
             .build()
     }
 
-    fn client_for(&self, url: &str, method: &str) -> reqwest::Client {
-        let key = (url.to_owned(), method.to_owned());
+    fn client_for(&self, url: &str) -> reqwest::Client {
         let mut clients = self.clients.lock().unwrap();
-        if let Some(client) = clients.get(&key) {
+        if let Some(client) = clients.get(url) {
             return client.clone();
         }
         let client = Self::build_client(self.timeout).unwrap_or_else(|_| self.fallback.clone());
-        clients.insert(key, client.clone());
+        clients.insert(url.to_owned(), client.clone());
         client
     }
 
@@ -217,7 +217,7 @@ impl RpcClient {
             "method": method,
             "params": params,
         });
-        let http = self.client_for(url, method);
+        let http = self.client_for(url);
         let Ok(response) = http.post(url).json(&body).send().await else {
             return RawResponse::Unavailable;
         };
@@ -263,7 +263,7 @@ impl RpcClient {
             "params": params,
         });
 
-        let http = self.client_for(url, method.rpc_name());
+        let http = self.client_for(url);
         let mut request = http.post(url).json(&body);
         if let Some(timeout) = timeout {
             request = request.timeout(timeout);
