@@ -161,17 +161,20 @@ impl RpcMethod {
                     && result.get("transaction").is_some()
             }
             Self::GetSignaturesForAddress => {
-                let Some(entries) = result.as_array() else {
+                let Some(entries) = result.as_array().filter(|a| !a.is_empty()) else {
                     return false;
                 };
-                let Some(first_slot) = entries.first().and_then(|e| e.get("slot")?.as_u64())
+                let Some(slots) = entries
+                    .iter()
+                    .map(|e| e.get("slot")?.as_u64())
+                    .collect::<Option<Vec<u64>>>()
                 else {
                     return false;
                 };
                 match &ctx.gsfa_anchor {
-                    // Signatures are newest-first, so bounding the first entry
-                    // bounds them all: everything must predate the anchor slot.
-                    Some((anchor_slot, _)) => first_slot < *anchor_slot,
+                    // Every entry must predate the anchor slot — checking only
+                    // the first would let an unordered page smuggle newer ones.
+                    Some((anchor_slot, _)) => slots.iter().all(|s| s < anchor_slot),
                     None => true,
                 }
             }
@@ -661,8 +664,13 @@ mod tests {
 
         let older = json!([{ "signature": "a", "slot": 122 }]);
         let newer = json!([{ "signature": "b", "slot": 123 }]);
+        let smuggled = json!([
+            { "signature": "a", "slot": 122 },
+            { "signature": "b", "slot": 123 },
+        ]);
         assert!(RpcMethod::GetSignaturesForAddress.is_valid_result(&older, &ctx));
         assert!(!RpcMethod::GetSignaturesForAddress.is_valid_result(&newer, &ctx));
+        assert!(!RpcMethod::GetSignaturesForAddress.is_valid_result(&smuggled, &ctx));
         assert!(!RpcMethod::GetSignaturesForAddress.is_valid_result(&json!([]), &ctx));
     }
 

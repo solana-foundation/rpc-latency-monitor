@@ -87,6 +87,7 @@ const GSFA_ANCHOR_MIN_SLOT: u64 = 50_000_000;
 impl CheckTask {
     async fn run(self) {
         let mut rotation = 0usize;
+        let mut used_anchor: Option<String> = None;
         loop {
             let gpa_target = rotated_target(
                 &self.gpa_targets,
@@ -95,11 +96,19 @@ impl CheckTask {
                 rotation,
             );
             rotation = rotation.wrapping_add(1);
+            // Each anchor is paged at most once per task: repeating a cursor
+            // would re-issue an identical (cacheable) query, defeating the
+            // random-depth property. No fresh anchor yet -> a recent page.
             let gsfa_anchor = (self.check.method == RpcMethod::GetSignaturesForAddress
                 && rotation.is_multiple_of(2))
-                .then(|| self.archival_anchor.current())
-                .flatten()
-                .filter(|(slot, _)| *slot >= GSFA_ANCHOR_MIN_SLOT);
+            .then(|| self.archival_anchor.current())
+            .flatten()
+            .filter(|(slot, sig)| {
+                *slot >= GSFA_ANCHOR_MIN_SLOT && used_anchor.as_ref() != Some(sig)
+            });
+            if let Some((_, sig)) = &gsfa_anchor {
+                used_anchor = Some(sig.clone());
+            }
             let ctx = RequestContext {
                 tip_slot: self.reference.current(),
                 recent_signature: self.shared.recent_signature(),

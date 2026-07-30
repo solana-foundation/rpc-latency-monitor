@@ -123,8 +123,10 @@ pub fn spawn_archival_check(
         let mut used = UsedSlots::default();
         loop {
             sleep(interval).await;
-            run_archival_round(&client, &providers, &metrics, &reference, &mut used, &anchor)
-                .await;
+            run_archival_round(
+                &client, &providers, &metrics, &reference, &mut used, &anchor,
+            )
+            .await;
         }
     });
 }
@@ -185,7 +187,6 @@ async fn run_archival_round(
     let Some(sig) = truth_sig else {
         return;
     };
-    anchor.set(slot, sig.clone());
     let mut tx_set = JoinSet::new();
     for provider in providers {
         let client = client.clone();
@@ -197,6 +198,7 @@ async fn run_archival_round(
             (name, result, tx_slot)
         });
     }
+    let mut sig_confirmations = 0usize;
     while let Some(joined) = tx_set.join_next().await {
         let Ok((name, result, tx_slot)) = joined else {
             continue;
@@ -214,7 +216,16 @@ async fn run_archival_round(
             Some(_) => "mismatch",
             None => "skipped",
         };
+        if verdict == "match" {
+            sig_confirmations += 1;
+        }
         metrics.record_claim_check(&name, RpcMethod::GetTransactionArchival, "", verdict);
+    }
+    // The signature came from ONE provider that matched the majority hash; only
+    // anchor gSFA on it once a quorum has independently confirmed it at this
+    // slot, so a fabricated signature can't poison every provider's cursor.
+    if sig_confirmations >= ARCHIVAL_MIN_QUORUM {
+        anchor.set(slot, sig);
     }
 }
 

@@ -335,11 +335,17 @@ fn classify(status: StatusCode, body: &[u8], method: RpcMethod, ctx: &RequestCon
         matches!(method, RpcMethod::GetSignaturesForAddress) && ctx.gsfa_anchor.is_some();
     Parsed {
         status: CallStatus::Success,
-        observed_slot: (!anchored_gsfa).then(|| method.observed_slot(result)).flatten(),
-        signature: (!anchored_gsfa).then(|| method.recent_signature(result)).flatten(),
+        observed_slot: (!anchored_gsfa)
+            .then(|| method.observed_slot(result))
+            .flatten(),
+        signature: (!anchored_gsfa)
+            .then(|| method.recent_signature(result))
+            .flatten(),
         archival_signature: method.archival_signature(result),
         accounts: method.recent_accounts(result),
-        claim: (!anchored_gsfa).then(|| method.claim_payload(result, ctx)).flatten(),
+        claim: (!anchored_gsfa)
+            .then(|| method.claim_payload(result, ctx))
+            .flatten(),
     }
 }
 
