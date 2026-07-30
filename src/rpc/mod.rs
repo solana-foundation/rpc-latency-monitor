@@ -192,9 +192,6 @@ impl RpcClient {
             .build()
     }
 
-    // Dedicated connection pool per (endpoint, method) so a slow-draining
-    // getProgramAccounts response can never head-of-line block another
-    // check's request on a shared HTTP/2 connection or pooled socket.
     fn client_for(&self, url: &str, method: &str) -> reqwest::Client {
         let key = (url.to_owned(), method.to_owned());
         let mut clients = self.clients.lock().unwrap();
@@ -291,9 +288,6 @@ impl RpcClient {
         let body = response.bytes().await;
         let latency = start.elapsed();
 
-        // Parsing happens after the clock stops, but a multi-megabyte body
-        // parsed inline would still stall this runtime worker and delay the
-        // timing wakeups of other in-flight checks on small hosts.
         let parsed = match body {
             Ok(bytes) if bytes.len() >= LARGE_BODY_BYTES => {
                 let ctx = ctx.clone();

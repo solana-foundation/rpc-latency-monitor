@@ -38,14 +38,15 @@ pub fn spawn_checks(
         ));
     }
     for endpoint in endpoints {
-        for check in checks {
-            if matches!(
-                check.method,
-                RpcMethod::GetBlockArchival | RpcMethod::GetTransactionArchival
-            ) {
-                continue;
-            }
-            let task = CheckTask {
+        let tasks: Vec<CheckTask> = checks
+            .iter()
+            .filter(|check| {
+                !matches!(
+                    check.method,
+                    RpcMethod::GetBlockArchival | RpcMethod::GetTransactionArchival
+                )
+            })
+            .map(|check| CheckTask {
                 provider: endpoint.name.clone(),
                 url: endpoint.url.clone(),
                 check: check.clone(),
@@ -58,10 +59,29 @@ pub fn spawn_checks(
                 gpa_targets: gpa_targets.clone(),
                 derived_gpa: derived_gpa.clone(),
                 archival_anchor: archival_anchor.clone(),
-            };
-            tokio::spawn(task.run());
-        }
+            })
+            .collect();
+        spawn_provider_runtime(&endpoint.name, tasks);
     }
+}
+
+fn spawn_provider_runtime(provider: &str, tasks: Vec<CheckTask>) {
+    let thread_name = format!("checks-{provider}");
+    std::thread::Builder::new()
+        .name(thread_name.clone())
+        .spawn(move || {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("provider check runtime");
+            runtime.block_on(async move {
+                for task in tasks {
+                    tokio::spawn(task.run());
+                }
+                std::future::pending::<()>().await;
+            });
+        })
+        .unwrap_or_else(|error| panic!("failed to spawn {thread_name}: {error}"));
 }
 
 struct CheckTask {
