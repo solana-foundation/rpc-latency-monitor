@@ -119,11 +119,16 @@ def main() -> int:
         print(f"{len(new)} new or reassigned entr{'y' if len(new) == 1 else 'ies'} vs base")
         for e in new:
             if "signature" not in e:
-                kind = "REASSIGNED" if e["address"] in base_addrs else "UNSIGNED new"
-                warnings.append(
-                    f"{kind} entry {e['address']} ({e['provider']}) without signature — "
-                    "maintainer must verify ownership (treasury sweep linkage) before merge"
-                )
+                if e["address"] in base_addrs:
+                    errors.append(
+                        f"reassigning {e['address']} to {e['provider']!r} requires a signature "
+                        "from the address key; unsigned relabels are maintainer-only migrations"
+                    )
+                else:
+                    warnings.append(
+                        f"UNSIGNED new entry {e['address']} ({e['provider']}) — "
+                        "maintainer must verify ownership (treasury sweep linkage) before merge"
+                    )
             if e["address"] in base_addrs:
                 continue
             try:

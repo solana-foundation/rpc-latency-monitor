@@ -48,6 +48,11 @@ If you cannot sign (cold key, HSM policy), omit `signature`. CI flags the
 entry and a maintainer verifies ownership out-of-band (on-chain sweep linkage
 to your known treasury) before merging — expect this path to be slower.
 
+Changing the `provider` of an address already in the registry always requires
+a signature — CI rejects unsigned reassignments outright, since that would
+redirect existing attribution. Legitimate unsigned relabels are done by
+maintainers directly.
+
 ### What CI checks
 
 - valid base58 32-byte addresses, no duplicates, no address already claimed by
