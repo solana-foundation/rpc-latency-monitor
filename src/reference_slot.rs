@@ -31,6 +31,26 @@ impl ReferenceSlot {
     }
 }
 
+/// Latest majority-verified (slot, signature) from the coordinated archival
+/// round. Anchors the archival rotation of getSignaturesForAddress; slots are
+/// random and never repeated, so anchored pages cannot be precomputed.
+#[derive(Debug, Clone, Default)]
+pub struct ArchivalAnchor {
+    inner: Arc<std::sync::Mutex<Option<(u64, String)>>>,
+}
+
+impl ArchivalAnchor {
+    pub fn set(&self, slot: u64, signature: String) {
+        if let Ok(mut guard) = self.inner.lock() {
+            *guard = Some((slot, signature));
+        }
+    }
+
+    pub fn current(&self) -> Option<(u64, String)> {
+        self.inner.lock().ok()?.clone()
+    }
+}
+
 pub async fn poll_reference_endpoint(
     client: RpcClient,
     url: String,

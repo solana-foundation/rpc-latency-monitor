@@ -9,7 +9,7 @@ use crate::gpa_derive::{self, DerivedTargets};
 use crate::metrics::Metrics;
 use crate::providers::ProviderEndpoint;
 use crate::reference_check::ClaimSink;
-use crate::reference_slot::ReferenceSlot;
+use crate::reference_slot::{ArchivalAnchor, ReferenceSlot};
 use crate::rpc::methods::RpcMethod;
 use crate::rpc::{CallResult, CallStatus, ErrorKind, RequestContext, RpcClient};
 
@@ -24,6 +24,7 @@ pub fn spawn_checks(
     claims: Option<ClaimSink>,
     gpa_targets: Vec<GpaTarget>,
     gpa_derive: Option<GpaDeriveConfig>,
+    archival_anchor: ArchivalAnchor,
 ) {
     let shared = SharedState::default();
     let gpa_targets = Arc::new(gpa_targets);
@@ -56,6 +57,7 @@ pub fn spawn_checks(
                 claims: claims.clone(),
                 gpa_targets: gpa_targets.clone(),
                 derived_gpa: derived_gpa.clone(),
+                archival_anchor: archival_anchor.clone(),
             };
             tokio::spawn(task.run());
         }
@@ -74,7 +76,13 @@ struct CheckTask {
     claims: Option<ClaimSink>,
     gpa_targets: Arc<Vec<GpaTarget>>,
     derived_gpa: DerivedTargets,
+    archival_anchor: ArchivalAnchor,
 }
+
+/// USDC has on-chain history from roughly this slot; anchoring earlier would
+/// make an empty page the correct answer, which is indistinguishable from a
+/// provider with no archive.
+const GSFA_ANCHOR_MIN_SLOT: u64 = 50_000_000;
 
 impl CheckTask {
     async fn run(self) {
@@ -87,19 +95,29 @@ impl CheckTask {
                 rotation,
             );
             rotation = rotation.wrapping_add(1);
+            let gsfa_anchor = (self.check.method == RpcMethod::GetSignaturesForAddress
+                && rotation.is_multiple_of(2))
+                .then(|| self.archival_anchor.current())
+                .flatten()
+                .filter(|(slot, _)| *slot >= GSFA_ANCHOR_MIN_SLOT);
             let ctx = RequestContext {
                 tip_slot: self.reference.current(),
                 recent_signature: self.shared.recent_signature(),
                 archival_signature: self.shared.archival_signature(),
                 recent_accounts: self.shared.recent_accounts(),
                 gpa_target,
+                gsfa_anchor,
             };
             if let Some(result) = self
                 .client
                 .call(&self.url, self.check.method, &ctx, self.check.timeout)
                 .await
             {
-                let target = ctx.gpa_target.as_ref().map_or("", |t| t.name.as_str());
+                let target = if ctx.gsfa_anchor.is_some() {
+                    "archival"
+                } else {
+                    ctx.gpa_target.as_ref().map_or("", |t| t.name.as_str())
+                };
                 self.record(&result, target);
             }
             sleep(self.next_delay()).await;

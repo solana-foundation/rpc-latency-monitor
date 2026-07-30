@@ -10,7 +10,7 @@ use tokio::time::sleep;
 use crate::config::{GpaTarget, ReferenceCheckConfig};
 use crate::metrics::Metrics;
 use crate::providers::ProviderEndpoint;
-use crate::reference_slot::ReferenceSlot;
+use crate::reference_slot::{ArchivalAnchor, ReferenceSlot};
 use crate::rpc::methods::{self, RpcMethod};
 use crate::rpc::{
     AccountSample, CallResult, CallStatus, ClaimPayload, ErrorKind, RawResponse, RpcClient,
@@ -113,6 +113,7 @@ pub fn spawn_archival_check(
     metrics: Metrics,
     reference: ReferenceSlot,
     interval: Duration,
+    anchor: ArchivalAnchor,
 ) {
     let providers: Vec<ProviderEndpoint> = endpoints.to_vec();
     if providers.len() < ARCHIVAL_MIN_QUORUM {
@@ -122,7 +123,8 @@ pub fn spawn_archival_check(
         let mut used = UsedSlots::default();
         loop {
             sleep(interval).await;
-            run_archival_round(&client, &providers, &metrics, &reference, &mut used).await;
+            run_archival_round(&client, &providers, &metrics, &reference, &mut used, &anchor)
+                .await;
         }
     });
 }
@@ -133,6 +135,7 @@ async fn run_archival_round(
     metrics: &Metrics,
     reference: &ReferenceSlot,
     used: &mut UsedSlots,
+    anchor: &ArchivalAnchor,
 ) {
     let Some(tip) = reference.current() else {
         return;
@@ -182,6 +185,7 @@ async fn run_archival_round(
     let Some(sig) = truth_sig else {
         return;
     };
+    anchor.set(slot, sig.clone());
     let mut tx_set = JoinSet::new();
     for provider in providers {
         let client = client.clone();

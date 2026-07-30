@@ -8,7 +8,7 @@ use tracing_subscriber::EnvFilter;
 use rpc_latency_monitor::config::{Config, ReferenceSource};
 use rpc_latency_monitor::metrics::Metrics;
 use rpc_latency_monitor::providers;
-use rpc_latency_monitor::reference_slot::{poll_reference_endpoint, ReferenceSlot};
+use rpc_latency_monitor::reference_slot::{poll_reference_endpoint, ArchivalAnchor, ReferenceSlot};
 use rpc_latency_monitor::rpc::RpcClient;
 use rpc_latency_monitor::{geo, reference_check, scheduler, server};
 
@@ -58,6 +58,7 @@ async fn main() -> anyhow::Result<()> {
         reference.clone(),
         config.claim_checks,
     );
+    let archival_anchor = ArchivalAnchor::default();
     scheduler::spawn_checks(
         &endpoints,
         &config.checks,
@@ -68,6 +69,7 @@ async fn main() -> anyhow::Result<()> {
         claims,
         config.gpa_targets.clone(),
         gpa_derive,
+        archival_anchor.clone(),
     );
     reference_check::spawn_reference_check(
         &endpoints,
@@ -83,6 +85,7 @@ async fn main() -> anyhow::Result<()> {
         metrics.clone(),
         reference,
         config.archival_interval,
+        archival_anchor,
     );
 
     server::serve(config.server.bind, metrics).await

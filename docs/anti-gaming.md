@@ -123,6 +123,15 @@ canned `slot → blockhash` answer and skip the actual deep read — it can't pr
 which ancient slot the next round asks for. And because archival data is immutable,
 cross-provider agreement is unambiguous truth (no timing skew, no fork), so no
 external archival endpoint is needed and no single provider grades the others.
+
+The round's majority-verified signature also anchors an **archival rotation of
+`getSignaturesForAddress`**: every other probe pages the USDC mint's history with
+`before: <that signature>`, exercising the full `address_signatures` index at a
+random, never-repeated depth (`target="archival"` on the metrics; recent and
+archival pages are the same method but separable by that label). The response must
+contain only slots strictly before the anchor. Anchored pages produce no layer-2
+claims — the reference node has purged that history — and their signatures are not
+harvested into the recent-signature pool.
 Results land in the same `rpc_claim_check_total{provider, method, result}` counter.
 
 ### Verdicts
