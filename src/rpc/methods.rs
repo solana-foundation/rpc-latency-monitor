@@ -172,8 +172,6 @@ impl RpcMethod {
                     return false;
                 };
                 match &ctx.gsfa_anchor {
-                    // Every entry must predate the anchor slot — checking only
-                    // the first would let an unordered page smuggle newer ones.
                     Some((anchor_slot, _)) => slots.iter().all(|s| s < anchor_slot),
                     None => true,
                 }

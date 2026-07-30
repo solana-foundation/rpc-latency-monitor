@@ -327,10 +327,6 @@ fn classify(status: StatusCode, body: &[u8], method: RpcMethod, ctx: &RequestCon
     if !method.is_valid_result(result, ctx) {
         return Parsed::error(ErrorKind::Empty);
     }
-    // Anchored (archival) gSFA rounds return old signatures: harvesting them
-    // would poison the recent-signature pool, their slots would trip the stale
-    // gate, and the reference node has purged that history so no claim can be
-    // judged (same rule as derived gPA targets).
     let anchored_gsfa =
         matches!(method, RpcMethod::GetSignaturesForAddress) && ctx.gsfa_anchor.is_some();
     Parsed {

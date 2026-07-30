@@ -221,9 +221,6 @@ async fn run_archival_round(
         }
         metrics.record_claim_check(&name, RpcMethod::GetTransactionArchival, "", verdict);
     }
-    // The signature came from ONE provider that matched the majority hash; only
-    // anchor gSFA on it once a quorum has independently confirmed it at this
-    // slot, so a fabricated signature can't poison every provider's cursor.
     if sig_confirmations >= ARCHIVAL_MIN_QUORUM {
         anchor.set(slot, sig);
     }

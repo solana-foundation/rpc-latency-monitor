@@ -79,9 +79,6 @@ struct CheckTask {
     archival_anchor: ArchivalAnchor,
 }
 
-/// USDC has on-chain history from roughly this slot; anchoring earlier would
-/// make an empty page the correct answer, which is indistinguishable from a
-/// provider with no archive.
 const GSFA_ANCHOR_MIN_SLOT: u64 = 50_000_000;
 
 impl CheckTask {
@@ -96,9 +93,6 @@ impl CheckTask {
                 rotation,
             );
             rotation = rotation.wrapping_add(1);
-            // Each anchor is paged at most once per task: repeating a cursor
-            // would re-issue an identical (cacheable) query, defeating the
-            // random-depth property. No fresh anchor yet -> a recent page.
             let gsfa_anchor = (self.check.method == RpcMethod::GetSignaturesForAddress
                 && rotation.is_multiple_of(2))
             .then(|| self.archival_anchor.current())
