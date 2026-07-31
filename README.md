@@ -137,6 +137,8 @@ providers:
     url: "https://${TRITON_HOST}/${TRITON_TOKEN}"
   - name: quicknode
     url: "${QUICKNODE_URL}"
+  - name: chainstack
+    url: "${CHAINSTACK_URL}"
 ```
 
 ### Checks
