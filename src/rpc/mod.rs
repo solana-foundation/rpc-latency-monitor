@@ -17,6 +17,7 @@ pub struct RequestContext {
     pub archival_signature: Option<String>,
     pub recent_accounts: Vec<String>,
     pub gpa_target: Option<GpaTarget>,
+    pub gsfa_anchor: Option<(u64, String)>,
 }
 
 #[derive(Debug, Clone)]
@@ -326,13 +327,21 @@ fn classify(status: StatusCode, body: &[u8], method: RpcMethod, ctx: &RequestCon
     if !method.is_valid_result(result, ctx) {
         return Parsed::error(ErrorKind::Empty);
     }
+    let anchored_gsfa =
+        matches!(method, RpcMethod::GetSignaturesForAddress) && ctx.gsfa_anchor.is_some();
     Parsed {
         status: CallStatus::Success,
-        observed_slot: method.observed_slot(result),
-        signature: method.recent_signature(result),
+        observed_slot: (!anchored_gsfa)
+            .then(|| method.observed_slot(result))
+            .flatten(),
+        signature: (!anchored_gsfa)
+            .then(|| method.recent_signature(result))
+            .flatten(),
         archival_signature: method.archival_signature(result),
         accounts: method.recent_accounts(result),
-        claim: method.claim_payload(result, ctx),
+        claim: (!anchored_gsfa)
+            .then(|| method.claim_payload(result, ctx))
+            .flatten(),
     }
 }
 
@@ -386,11 +395,44 @@ mod tests {
     fn success_extracts_signature_for_signature_query() {
         let parsed = classify(
             StatusCode::OK,
-            &body(r#"{"jsonrpc":"2.0","result":[{"signature":"abc"}],"id":1}"#),
+            &body(r#"{"jsonrpc":"2.0","result":[{"signature":"abc","slot":5}],"id":1}"#),
             RpcMethod::GetSignaturesForAddress,
             &RequestContext::default(),
         );
         assert_eq!(parsed.signature, Some("abc".to_string()));
+    }
+
+    #[test]
+    fn anchored_signature_query_yields_no_claim_slot_or_harvest() {
+        let ctx = RequestContext {
+            gsfa_anchor: Some((100, "anchor".to_string())),
+            ..RequestContext::default()
+        };
+        let parsed = classify(
+            StatusCode::OK,
+            &body(r#"{"jsonrpc":"2.0","result":[{"signature":"old","slot":50}],"id":1}"#),
+            RpcMethod::GetSignaturesForAddress,
+            &ctx,
+        );
+        assert_eq!(parsed.status, CallStatus::Success);
+        assert_eq!(parsed.signature, None);
+        assert_eq!(parsed.observed_slot, None);
+        assert!(parsed.claim.is_none());
+    }
+
+    #[test]
+    fn anchored_signature_query_rejects_slots_at_or_past_the_anchor() {
+        let ctx = RequestContext {
+            gsfa_anchor: Some((100, "anchor".to_string())),
+            ..RequestContext::default()
+        };
+        let parsed = classify(
+            StatusCode::OK,
+            &body(r#"{"jsonrpc":"2.0","result":[{"signature":"new","slot":100}],"id":1}"#),
+            RpcMethod::GetSignaturesForAddress,
+            &ctx,
+        );
+        assert_eq!(parsed.status, CallStatus::Error(ErrorKind::Empty));
     }
 
     #[test]

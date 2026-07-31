@@ -114,9 +114,16 @@ impl RpcMethod {
                     { "encoding": "base64", "commitment": "processed" },
                 ])
             }
-            Self::GetSignaturesForAddress => {
-                json!([FALLBACK_ADDRESS, { "limit": SIGNATURES_LIMIT, "commitment": "confirmed" }])
-            }
+            Self::GetSignaturesForAddress => match &ctx.gsfa_anchor {
+                Some((_, before)) => json!([
+                    FALLBACK_ADDRESS,
+                    { "limit": SIGNATURES_LIMIT, "before": before, "commitment": "confirmed" },
+                ]),
+                None => json!([
+                    FALLBACK_ADDRESS,
+                    { "limit": SIGNATURES_LIMIT, "commitment": "confirmed" },
+                ]),
+            },
             Self::GetBlockRecent | Self::GetBlockArchival => block_params(self.probed_slot(ctx)?),
             Self::GetTransactionRecent => transaction_params(ctx.recent_signature.clone()?),
             Self::GetTransactionArchival => transaction_params(ctx.archival_signature.clone()?),
@@ -153,7 +160,22 @@ impl RpcMethod {
                     && result.get("slot").is_some()
                     && result.get("transaction").is_some()
             }
-            Self::GetSignaturesForAddress => result.as_array().is_some_and(|a| !a.is_empty()),
+            Self::GetSignaturesForAddress => {
+                let Some(entries) = result.as_array().filter(|a| !a.is_empty()) else {
+                    return false;
+                };
+                let Some(slots) = entries
+                    .iter()
+                    .map(|e| non_empty_str(e.get("signature")).then(|| e.get("slot")?.as_u64())?)
+                    .collect::<Option<Vec<u64>>>()
+                else {
+                    return false;
+                };
+                match &ctx.gsfa_anchor {
+                    Some((anchor_slot, _)) => slots.iter().all(|s| s < anchor_slot),
+                    None => true,
+                }
+            }
         }
     }
 
@@ -623,6 +645,36 @@ mod tests {
             .build_params(&RequestContext::default())
             .unwrap();
         assert_eq!(params[1]["limit"], json!(SIGNATURES_LIMIT));
+        assert!(params[1].get("before").is_none());
+    }
+
+    #[test]
+    fn anchored_signatures_query_pages_before_the_anchor() {
+        let ctx = RequestContext {
+            gsfa_anchor: Some((123, "anchorsig".to_string())),
+            ..RequestContext::default()
+        };
+        let params = RpcMethod::GetSignaturesForAddress
+            .build_params(&ctx)
+            .unwrap();
+        assert_eq!(params[1]["before"], json!("anchorsig"));
+        assert_eq!(params[1]["limit"], json!(SIGNATURES_LIMIT));
+
+        let older = json!([{ "signature": "a", "slot": 122 }]);
+        let newer = json!([{ "signature": "b", "slot": 123 }]);
+        let smuggled = json!([
+            { "signature": "a", "slot": 122 },
+            { "signature": "b", "slot": 123 },
+        ]);
+        assert!(RpcMethod::GetSignaturesForAddress.is_valid_result(&older, &ctx));
+        assert!(!RpcMethod::GetSignaturesForAddress.is_valid_result(&newer, &ctx));
+        assert!(!RpcMethod::GetSignaturesForAddress.is_valid_result(&smuggled, &ctx));
+        assert!(!RpcMethod::GetSignaturesForAddress.is_valid_result(&json!([]), &ctx));
+
+        let unsigned = json!([{ "slot": 122 }]);
+        let blank_sig = json!([{ "signature": "", "slot": 122 }]);
+        assert!(!RpcMethod::GetSignaturesForAddress.is_valid_result(&unsigned, &ctx));
+        assert!(!RpcMethod::GetSignaturesForAddress.is_valid_result(&blank_sig, &ctx));
     }
 
     #[test]
