@@ -291,8 +291,10 @@ impl RpcClient {
         let parsed = match body {
             Ok(bytes) if bytes.len() >= LARGE_BODY_BYTES => {
                 let ctx = ctx.clone();
-                match tokio::task::spawn_blocking(move || classify(http_status, &bytes, method, &ctx))
-                    .await
+                match tokio::task::spawn_blocking(move || {
+                    classify(http_status, &bytes, method, &ctx)
+                })
+                .await
                 {
                     Ok(parsed) => parsed,
                     Err(_) => Parsed::error(ErrorKind::Transport),
