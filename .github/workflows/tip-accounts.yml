@@ -1,0 +1,25 @@
+name: Validate tip-accounts registry
+
+on:
+  pull_request:
+    paths:
+      - 'tip-accounts.json'
+      - 'tip-accounts.schema.json'
+      - 'scripts/validate_tip_accounts.py'
+      - '.github/workflows/tip-accounts.yml'
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38 # v5.4.0
+        with:
+          python-version: '3.12'
+      - run: pip install base58 pynacl
+      - name: Fetch base registry
+        run: git show "origin/${{ github.base_ref }}:tip-accounts.json" > /tmp/base-tip-accounts.json
+      - name: Validate
+        run: python scripts/validate_tip_accounts.py --base /tmp/base-tip-accounts.json tip-accounts.json
