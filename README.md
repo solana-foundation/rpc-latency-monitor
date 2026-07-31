@@ -174,10 +174,10 @@ code changes required.
 ## Registering your tip accounts (for senders)
 
 Sender/landing providers on the tip leaderboard label their own tip accounts in
-[`tip-accounts.json`](./tip-accounts.json) — including private/rotating addresses. Open a PR with your
+[`sender/tip-accounts.json`](./sender/tip-accounts.json) — including private/rotating addresses. Open a PR with your
 addresses and a per-address ownership signature; CI validates the claim and the pipeline picks it up
 within about an hour of merge. Unlisted addresses mean undercounted volume for you. See
-[`docs/tip-accounts.md`](./docs/tip-accounts.md).
+[`sender/README.md`](./sender/README.md).
 
 ## Adding your RPC (for providers)
 
