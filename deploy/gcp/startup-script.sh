@@ -9,6 +9,15 @@ meta() {
     "http://metadata.google.internal/computeMetadata/v1/instance/attributes/$1"
 }
 
+sysctl -w net.ipv4.tcp_slow_start_after_idle=0 \
+  net.ipv4.tcp_fastopen=3 \
+  net.ipv4.tcp_mtu_probing=1 \
+  net.core.rmem_max=33554432 \
+  net.core.wmem_max=33554432 \
+  net.core.default_qdisc=fq >/dev/null 2>&1 || true
+sysctl -w net.ipv4.tcp_rmem="4096 262144 33554432" net.ipv4.tcp_wmem="4096 262144 33554432" >/dev/null 2>&1 || true
+modprobe tcp_bbr >/dev/null 2>&1 && sysctl -w net.ipv4.tcp_congestion_control=bbr >/dev/null 2>&1 || true
+
 export REGION="$(meta monitor-region)"
 export IMAGE="$(meta monitor-image)"
 export DOPPLER_TOKEN="$(meta doppler-token)"
