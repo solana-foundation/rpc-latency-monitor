@@ -121,6 +121,10 @@ gpa_targets:
 providers:
   - name: alchemy
     url: "${ALCHEMY_URL}"
+  - name: chainstack
+    url: "${CHAINSTACK_URL}"
+  - name: fluxrpc
+    url: "https://cdn.fluxrpc.com?key=${FLUXRPC_KEY}"
   - name: helius
     url: "https://mainnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}"
   - name: quicknode

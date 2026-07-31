@@ -16,6 +16,10 @@ gpa_derive:
   endpoint: "${REFERENCE_RPC_URL}"
 
 providers:
+  - name: chainstack
+    url: "${CHAINSTACK_URL}"
+  - name: fluxrpc
+    url: "https://cdn.fluxrpc.com?key=${FLUXRPC_KEY}"
   - name: helius
     url: "https://beta.helius-rpc.com/?api-key=${HELIUS_API_KEY}"
   - name: triton
