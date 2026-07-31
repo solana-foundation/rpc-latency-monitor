@@ -36,6 +36,29 @@
     mode: "0750"
   become: true
 
+- name: Load BBR congestion control module now and on boot
+  community.general.modprobe:
+    name: tcp_bbr
+    state: present
+    persistent: present
+  become: true
+
+- name: Install TCP tuning sysctls
+  ansible.builtin.copy:
+    src: 99-rpc-monitor-tcp.conf
+    dest: /etc/sysctl.d/99-rpc-monitor-tcp.conf
+    owner: root
+    group: root
+    mode: "0644"
+  become: true
+  register: tcp_sysctls
+
+- name: Apply sysctls
+  ansible.builtin.command: sysctl --system
+  when: tcp_sysctls.changed
+  become: true
+  changed_when: true
+
 - name: Install build dependencies
   ansible.builtin.apt:
     name: "{{ apt_build_deps }}"
