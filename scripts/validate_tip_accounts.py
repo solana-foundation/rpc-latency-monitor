@@ -69,7 +69,7 @@ def load_entries(path: str) -> list[dict]:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("file", nargs="?", default="tip-accounts.json")
+    parser.add_argument("file", nargs="?", default="sender/tip-accounts.json")
     parser.add_argument("--base", help="registry file from the base branch; enables new-entry checks")
     parser.add_argument("--rpc", default="https://api.mainnet-beta.solana.com")
     args = parser.parse_args()
