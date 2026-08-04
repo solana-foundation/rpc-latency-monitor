@@ -184,6 +184,17 @@ within about an hour of merge. Unlisted addresses mean undercounted volume for y
 We welcome RPC providers adding themselves. Inclusion is neutral and additive — no code changes, just
 configuration — and everyone is measured on identical terms (same methods, regions, cadence, and code).
 
+**Stated coverage & regional endpoints**
+
+By default every provider is measured from every vantage point with one global URL. Two optional
+per-provider fields adjust that, and both are public in this repo so coverage is never a private deal:
+
+- `geos`: the geo groups you serve (e.g. `[us-east, us-west, eu-central, eu-west]`). Vantages outside
+  your stated coverage skip you entirely — you have no rows there, rather than bad ones. The tradeoff
+  is visible to users: a provider with narrower coverage is absent from those regional panels.
+- `region_urls`: per-region endpoint overrides, so a vantage hits your nearest regional endpoint
+  instead of a global load balancer. These must be the same public URLs your customers use.
+
 **Eligibility**
 
 - A standard **Solana mainnet JSON-RPC** endpoint.

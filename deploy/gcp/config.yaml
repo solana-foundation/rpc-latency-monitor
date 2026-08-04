@@ -20,6 +20,7 @@ providers:
     url: "${CHAINSTACK_URL}"
   - name: fluxrpc
     url: "https://cdn.fluxrpc.com?key=${FLUXRPC_KEY}"
+    geos: [us-east, us-west, eu-central, eu-west]
   - name: helius
     url: "https://beta.helius-rpc.com/?api-key=${HELIUS_API_KEY}"
   - name: triton
