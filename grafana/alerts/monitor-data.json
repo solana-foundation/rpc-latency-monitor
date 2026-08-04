@@ -260,7 +260,7 @@
      },
      "annotations": {
       "summary": "{{ $labels.provider }} repeatedly claimed slots ahead of physics in the last hour",
-      "description": "More than 5 implausible verdicts in an hour: the provider kept claiming slots ahead of the reference node tip + margin. Single-digit counts are suppressed - brief reference-node lag near the margin produces a benign trickle (~3 seen 2026-07-28). A sustained stream is either real gaming or a stuck reference tip; check rpc_reference_node_lag first.",
+      "description": "More than 5 implausible verdicts in an hour for this provider, while at most 2 providers show the pattern - an isolated stream is either real gaming or a provider-specific fault. When 3+ providers go implausible simultaneously the per-provider alerts are inhibited (that signature means the reference node's tip is stuck or catching up, not coordinated gaming) and the reference-node-suspect alert fires instead. Check rpc_reference_node_lag and pillar node health first regardless.",
       "runbook": "Break down by rpc_claim_check_total{provider, method, target, result} to find which method/target mismatched. Cross-check the reference node's health (rpc_reference_node_lag, pillar alerts) first; then manually replay the claim against the provider and the node before treating it as provider dishonesty. Do not communicate externally without a second confirmed sample."
      },
      "data": [
@@ -277,7 +277,7 @@
          "type": "prometheus",
          "uid": "${GRAFANA_DATASOURCE_UID}"
         },
-        "expr": "sum by (provider) (increase(rpc_claim_check_total{result=\"implausible\",provider!=\"fluxrpc\"}[1h]))",
+        "expr": "(sum by (provider) (increase(rpc_claim_check_total{result=\"implausible\",provider!=\"fluxrpc\"}[1h])) > 5) and on() (count(sum by (provider) (increase(rpc_claim_check_total{result=\"implausible\",provider!=\"fluxrpc\"}[1h])) > 5) <= 2)",
         "instant": true,
         "intervalMs": 1000,
         "maxDataPoints": 43200
@@ -511,6 +511,94 @@
        }
       }
      ]
+    },
+    {
+     "uid": "rpc-reference-tip-suspect",
+     "title": "Reference tip suspect (multi-provider implausible)",
+     "condition": "C",
+     "for": "0s",
+     "noDataState": "OK",
+     "execErrState": "Error",
+     "labels": {
+      "severity": "warning",
+      "service": "rpc-latency-monitor"
+     },
+     "annotations": {
+      "summary": "3+ providers scored implausible in the last hour - the reference tip itself is suspect",
+      "description": "Three or more providers simultaneously claiming slots ahead of the reference tip is definitionally a reference-node problem (stuck or catching-up tip), not coordinated gaming. Per-provider implausible alerts are inhibited in this state. Check rpc_reference_node_lag, pillar node health, and recent validator restarts on rpc-node-eu."
+     },
+     "data": [
+      {
+       "refId": "A",
+       "relativeTimeRange": {
+        "from": 3600,
+        "to": 0
+       },
+       "datasourceUid": "${GRAFANA_DATASOURCE_UID}",
+       "model": {
+        "refId": "A",
+        "datasource": {
+         "type": "prometheus",
+         "uid": "${GRAFANA_DATASOURCE_UID}"
+        },
+        "expr": "count(sum by (provider) (increase(rpc_claim_check_total{result=\"implausible\",provider!=\"fluxrpc\"}[1h])) > 5) >= 3",
+        "instant": true,
+        "intervalMs": 1000,
+        "maxDataPoints": 43200
+       }
+      },
+      {
+       "refId": "B",
+       "datasourceUid": "__expr__",
+       "model": {
+        "refId": "B",
+        "type": "reduce",
+        "datasource": {
+         "type": "__expr__",
+         "uid": "__expr__"
+        },
+        "expression": "A",
+        "reducer": "last"
+       }
+      },
+      {
+       "refId": "C",
+       "datasourceUid": "__expr__",
+       "model": {
+        "refId": "C",
+        "type": "threshold",
+        "datasource": {
+         "type": "__expr__",
+         "uid": "__expr__"
+        },
+        "expression": "B",
+        "conditions": [
+         {
+          "type": "query",
+          "evaluator": {
+           "type": "gt",
+           "params": [
+            5
+           ]
+          },
+          "operator": {
+           "type": "and"
+          },
+          "query": {
+           "params": [
+            "C"
+           ]
+          },
+          "reducer": {
+           "type": "last",
+           "params": []
+          }
+         }
+        ]
+       }
+      }
+     ],
+     "keep_firing_for": "2h"
     }
    ]
   }
