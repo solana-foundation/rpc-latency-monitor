@@ -246,15 +246,14 @@ workflow, alert rules, and the fleet runtime config — lives in this repo under
 Solana Foundation runs the monitor across four infrastructures (GCP, AWS, and two bare-metal
 providers); the original GCP fleet spans seven regions across North America, Europe, and Asia:
 
-| Region | Location |
-| --- | --- |
-| `us-east4` | Virginia, US |
-| `us-west2` | Los Angeles, US |
-| `europe-west2` | London, UK |
-| `europe-west3` | Frankfurt, DE |
-| `asia-northeast1` | Tokyo, JP |
-| `asia-northeast3` | Seoul, KR |
-| `asia-southeast1` | Singapore, SG |
+| Region | Location | Infra |
+|--------|----------|-------|
+| us-east4 / us-east-1 / nyc / ewr2 / pit1 | Virginia, New York, Newark, Pittsburgh (US East) | gcp, aws, latitude, tsw |
+| us-west2 / us-west-1 / lax / lax1 | Los Angeles, N. California (US West) | gcp, aws, latitude, tsw |
+| europe-west2 / eu-west-2 / eu-west-1 / lon / lon1 | London, Dublin (EU West) | gcp, aws, latitude, tsw |
+| europe-west3 / europe-west4 / eu-central-1 / fra / fra2 / ams / ams3 | Frankfurt, Amsterdam (EU Central) | gcp, aws, latitude, tsw |
+| asia-northeast1 / ap-northeast-1 / tyo / tyo2 | Tokyo (AP Northeast) | gcp, aws, latitude, tsw |
+| asia-southeast1 / ap-southeast-1 / sgp / sgp2 | Singapore (AP Southeast) | gcp, aws, latitude, tsw |
 
 Each container exports Prometheus metrics that are scraped locally and forwarded to Grafana Cloud.
 
