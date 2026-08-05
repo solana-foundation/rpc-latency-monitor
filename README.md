@@ -184,6 +184,17 @@ within about an hour of merge. Unlisted addresses mean undercounted volume for y
 We welcome RPC providers adding themselves. Inclusion is neutral and additive — no code changes, just
 configuration — and everyone is measured on identical terms (same methods, regions, cadence, and code).
 
+**Stated coverage & regional endpoints**
+
+By default every provider is measured from every vantage point with one global URL. Two optional
+per-provider fields adjust that, and both are public in this repo so coverage is never a private deal:
+
+- `geos`: the geo groups you serve (e.g. `[us-east, us-west, eu-central, eu-west]`). Vantages outside
+  your stated coverage skip you entirely — you have no rows there, rather than bad ones. The tradeoff
+  is visible to users: a provider with narrower coverage is absent from those regional panels.
+- `region_urls`: per-region endpoint overrides, so a vantage hits your nearest regional endpoint
+  instead of a global load balancer. These must be the same public URLs your customers use.
+
 **Eligibility**
 
 - A standard **Solana mainnet JSON-RPC** endpoint.
@@ -235,15 +246,14 @@ workflow, alert rules, and the fleet runtime config — lives in this repo under
 Solana Foundation runs the monitor across four infrastructures (GCP, AWS, and two bare-metal
 providers); the original GCP fleet spans seven regions across North America, Europe, and Asia:
 
-| Region | Location |
-| --- | --- |
-| `us-east4` | Virginia, US |
-| `us-west2` | Los Angeles, US |
-| `europe-west2` | London, UK |
-| `europe-west3` | Frankfurt, DE |
-| `asia-northeast1` | Tokyo, JP |
-| `asia-northeast3` | Seoul, KR |
-| `asia-southeast1` | Singapore, SG |
+| Region | Location | Infra |
+|--------|----------|-------|
+| us-east4 / us-east-1 / nyc / ewr2 / pit1 | Virginia, New York, Newark, Pittsburgh (US East) | gcp, aws, latitude, tsw |
+| us-west2 / us-west-1 / lax / lax1 | Los Angeles, N. California (US West) | gcp, aws, latitude, tsw |
+| europe-west2 / eu-west-2 / eu-west-1 / lon / lon1 | London, Dublin (EU West) | gcp, aws, latitude, tsw |
+| europe-west3 / europe-west4 / eu-central-1 / fra / fra2 / ams / ams3 | Frankfurt, Amsterdam (EU Central) | gcp, aws, latitude, tsw |
+| asia-northeast1 / ap-northeast-1 / tyo / tyo2 | Tokyo (AP Northeast) | gcp, aws, latitude, tsw |
+| asia-southeast1 / ap-southeast-1 / sgp / sgp2 | Singapore (AP Southeast) | gcp, aws, latitude, tsw |
 
 Each container exports Prometheus metrics that are scraped locally and forwarded to Grafana Cloud.
 

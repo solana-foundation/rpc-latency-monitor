@@ -122,6 +122,10 @@ pub enum ReferenceSource {
 pub struct ProviderConfig {
     pub name: String,
     pub url: String,
+    #[serde(default)]
+    pub geos: Vec<String>,
+    #[serde(default)]
+    pub region_urls: std::collections::HashMap<String, String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]

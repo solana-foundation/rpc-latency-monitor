@@ -125,6 +125,15 @@ providers:
     url: "${CHAINSTACK_URL}"
   - name: fluxrpc
     url: "https://cdn.fluxrpc.com?key=${FLUXRPC_KEY}"
+    # Optional stated coverage: only probe from these geo groups (see src/geo.rs
+    # for the region->geo mapping). Omit to be measured from every vantage.
+    # The provider simply has no rows in excluded regions' panels.
+    geos: [us-east, us-west, eu-central, eu-west]
+    # Optional per-region endpoint overrides (public, customer-usable URLs only);
+    # any region not listed falls back to `url`.
+    # region_urls:
+    #   fra: "https://eu.fluxrpc.com?key=${FLUXRPC_KEY}"
+    #   nyc: "https://us.fluxrpc.com?key=${FLUXRPC_KEY}"
   - name: helius
     url: "https://mainnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}"
   - name: quicknode

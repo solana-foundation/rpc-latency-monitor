@@ -38,11 +38,46 @@ pub enum ResolveError {
 
 pub fn resolve_endpoints(
     providers: &[ProviderConfig],
+    region: &str,
 ) -> Result<Vec<ProviderEndpoint>, ResolveError> {
     providers
         .iter()
-        .map(|p| resolve_one(p, &|name| std::env::var(name).ok()))
+        .filter(|p| serves_region(p, region))
+        .map(|p| resolve_one(p, region, &|name| std::env::var(name).ok()))
         .collect()
+}
+
+pub fn serves_region(provider: &ProviderConfig, region: &str) -> bool {
+    provider.geos.is_empty()
+        || provider
+            .geos
+            .iter()
+            .any(|g| g == crate::geo::geo_for(region))
+}
+
+pub const KNOWN_GEOS: &[&str] = &[
+    "us-east",
+    "us-west",
+    "eu-central",
+    "eu-west",
+    "ap-northeast",
+    "ap-southeast",
+];
+
+pub fn validate_geos(providers: &[ProviderConfig]) -> Result<(), String> {
+    for p in providers {
+        for g in &p.geos {
+            if !KNOWN_GEOS.contains(&g.as_str()) {
+                return Err(format!(
+                    "provider '{}' lists unknown geo '{}'; known geos: {}",
+                    p.name,
+                    g,
+                    KNOWN_GEOS.join(", ")
+                ));
+            }
+        }
+    }
+    Ok(())
 }
 
 pub fn resolve_url(context: &str, url: &str) -> Result<String, ResolveError> {
@@ -51,9 +86,11 @@ pub fn resolve_url(context: &str, url: &str) -> Result<String, ResolveError> {
 
 fn resolve_one(
     provider: &ProviderConfig,
+    region: &str,
     lookup: &impl Fn(&str) -> Option<String>,
 ) -> Result<ProviderEndpoint, ResolveError> {
-    let url = substitute(&provider.url, lookup).map_err(|e| e.with_provider(&provider.name))?;
+    let raw = provider.region_urls.get(region).unwrap_or(&provider.url);
+    let url = substitute(raw, lookup).map_err(|e| e.with_provider(&provider.name))?;
     Ok(ProviderEndpoint {
         name: provider.name.clone(),
         url,
@@ -178,12 +215,63 @@ mod tests {
     }
 
     #[test]
+    fn geos_scope_providers_to_regions() {
+        let scoped = ProviderConfig {
+            name: "fluxrpc".to_string(),
+            url: "https://cdn.example".to_string(),
+            geos: vec!["eu-central".to_string(), "us-east".to_string()],
+            region_urls: Default::default(),
+        };
+        assert!(serves_region(&scoped, "fra"));
+        assert!(serves_region(&scoped, "nyc"));
+        assert!(!serves_region(&scoped, "tyo2"));
+        assert!(!serves_region(&scoped, "asia-southeast1"));
+        let global = ProviderConfig {
+            name: "helius".to_string(),
+            url: "https://x".to_string(),
+            geos: Vec::new(),
+            region_urls: Default::default(),
+        };
+        assert!(serves_region(&global, "tyo2"));
+    }
+
+    #[test]
+    fn region_urls_override_the_default_url() {
+        let mut region_urls = std::collections::HashMap::new();
+        region_urls.insert("fra".to_string(), "https://eu.example/${K}".to_string());
+        let provider = ProviderConfig {
+            name: "fluxrpc".to_string(),
+            url: "https://cdn.example/${K}".to_string(),
+            geos: Vec::new(),
+            region_urls,
+        };
+        let eu = resolve_one(&provider, "fra", &lookup(&[("K", "v")])).unwrap();
+        assert_eq!(eu.url, "https://eu.example/v");
+        let other = resolve_one(&provider, "nyc", &lookup(&[("K", "v")])).unwrap();
+        assert_eq!(other.url, "https://cdn.example/v");
+    }
+
+    #[test]
+    fn validate_geos_rejects_typos() {
+        let provider = ProviderConfig {
+            name: "fluxrpc".to_string(),
+            url: "https://x".to_string(),
+            geos: vec!["europe".to_string()],
+            region_urls: Default::default(),
+        };
+        assert!(validate_geos(&[provider]).is_err());
+    }
+
+    #[test]
     fn resolve_one_attaches_provider_context_to_errors() {
         let provider = ProviderConfig {
             name: "helius".to_string(),
             url: "https://x/${NOPE}".to_string(),
+            geos: Vec::new(),
+            region_urls: Default::default(),
         };
-        let err = resolve_one(&provider, &lookup(&[])).expect_err("missing env should error");
+        let err =
+            resolve_one(&provider, "fra", &lookup(&[])).expect_err("missing env should error");
         assert!(matches!(
             err,
             ResolveError::MissingEnv { provider, var } if provider == "helius" && var == "NOPE"

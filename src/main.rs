@@ -25,7 +25,13 @@ async fn main() -> anyhow::Result<()> {
 
     let args = Args::parse();
     let mut config = Config::load(&args.config)?;
-    let endpoints = providers::resolve_endpoints(&config.providers)?;
+    providers::validate_geos(&config.providers).map_err(anyhow::Error::msg)?;
+    let endpoints = providers::resolve_endpoints(&config.providers, &config.region)?;
+    for p in &config.providers {
+        if !providers::serves_region(p, &config.region) {
+            info!(provider = %p.name, region = %config.region, "provider excluded in this region by stated coverage");
+        }
+    }
     let mut gpa_derive = config.gpa_derive.clone();
     if let Some(derive) = gpa_derive.as_mut() {
         derive.endpoint = providers::resolve_url("gpa_derive.endpoint", &derive.endpoint)?;
