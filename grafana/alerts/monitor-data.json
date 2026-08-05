@@ -251,7 +251,7 @@
      "uid": "rpc-claim-implausible",
      "title": "Provider claiming slots ahead of physics (anti-gaming)",
      "condition": "C",
-     "for": "0s",
+     "for": "30m",
      "noDataState": "OK",
      "execErrState": "Error",
      "labels": {
@@ -259,15 +259,15 @@
       "service": "rpc-latency-monitor"
      },
      "annotations": {
-      "summary": "{{ $labels.provider }} repeatedly claimed slots ahead of physics in the last hour",
-      "description": "More than 5 implausible verdicts in an hour for this provider, while at most 2 providers show the pattern - an isolated stream is either real gaming or a provider-specific fault. When 3+ providers go implausible simultaneously the per-provider alerts are inhibited (that signature means the reference node's tip is stuck or catching up, not coordinated gaming) and the reference-node-suspect alert fires instead. Check rpc_reference_node_lag and pillar node health first regardless.",
+      "summary": "{{ $labels.provider }} shows a sustained isolated stream of implausible slot claims",
+      "description": "More than 25 implausible verdicts over 3 hours for this provider, sustained 30 minutes, while at most 2 providers show the pattern - an isolated sustained stream is either real gaming or a provider-specific fault. Brief bursts during reference-node tip stutter no longer page per provider; when 3+ providers go implausible together the reference-tip-suspect alert fires instead. Check rpc_reference_node_lag and pillar node health first regardless.",
       "runbook": "Break down by rpc_claim_check_total{provider, method, target, result} to find which method/target mismatched. Cross-check the reference node's health (rpc_reference_node_lag, pillar alerts) first; then manually replay the claim against the provider and the node before treating it as provider dishonesty. Do not communicate externally without a second confirmed sample."
      },
      "data": [
       {
        "refId": "A",
        "relativeTimeRange": {
-        "from": 3600,
+        "from": 10800,
         "to": 0
        },
        "datasourceUid": "${GRAFANA_DATASOURCE_UID}",
@@ -277,7 +277,7 @@
          "type": "prometheus",
          "uid": "${GRAFANA_DATASOURCE_UID}"
         },
-        "expr": "(sum by (provider) (increase(rpc_claim_check_total{result=\"implausible\",provider!=\"fluxrpc\"}[1h])) > 5) and on() (count(sum by (provider) (increase(rpc_claim_check_total{result=\"implausible\",provider!=\"fluxrpc\"}[1h])) > 5) <= 2)",
+        "expr": "(sum by (provider) (increase(rpc_claim_check_total{result=\"implausible\",provider!=\"fluxrpc\"}[3h])) > 25) and on() (count(sum by (provider) (increase(rpc_claim_check_total{result=\"implausible\",provider!=\"fluxrpc\"}[3h])) > 25) <= 2)",
         "instant": true,
         "intervalMs": 1000,
         "maxDataPoints": 43200
