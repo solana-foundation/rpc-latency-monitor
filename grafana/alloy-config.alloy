@@ -2,7 +2,7 @@ prometheus.scrape "rpc_latency_monitor" {
   targets = [
     { "__address__" = "127.0.0.1:9464", "job" = "rpc-latency-monitor" },
   ]
-  scrape_interval = "15s"
+  scrape_interval = "60s"
   forward_to      = [prometheus.remote_write.grafana_cloud.receiver]
 }
 
