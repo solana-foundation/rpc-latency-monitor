@@ -1,606 +1,684 @@
 {
- "apiVersion": 1,
- "groups": [
-  {
-   "orgId": 1,
-   "name": "rpc-latency-monitor",
-   "folder": "${GRAFANA_FOLDER_UID}",
-   "interval": "1m",
-   "rules": [
+  "apiVersion": 1,
+  "groups": [
     {
-     "uid": "rpc-monitor-no-data",
-     "title": "rpc-latency monitor not reporting (dashboard has no data)",
-     "condition": "C",
-     "for": "10m",
-     "noDataState": "Alerting",
-     "execErrState": "Error",
-     "labels": {
-      "severity": "critical",
-      "service": "rpc-latency-monitor"
-     },
-     "annotations": {
-      "summary": "rpc-latency monitor is not reporting any metrics",
-      "description": "No rpc_up series are present over the last 5m, so the RPC latency dashboards have no data to display. The metrics pipeline (monitor VM, scrape, or remote-write) has stopped. This is independent of any individual provider being down or slow.",
-      "runbook": "Check that the monitor VM is running and exporting metrics, that Prometheus/Alloy is scraping and remote-writing successfully, and that the Grafana datasource is healthy. This alert intentionally ignores per-provider health; it fires only when the dashboards would be blank."
-     },
-     "data": [
-      {
-       "refId": "A",
-       "relativeTimeRange": {
-        "from": 300,
-        "to": 0
-       },
-       "datasourceUid": "${GRAFANA_DATASOURCE_UID}",
-       "model": {
-        "refId": "A",
-        "datasource": {
-         "type": "prometheus",
-         "uid": "${GRAFANA_DATASOURCE_UID}"
-        },
-        "expr": "count(rpc_up)",
-        "instant": true,
-        "intervalMs": 1000,
-        "maxDataPoints": 43200
-       }
-      },
-      {
-       "refId": "B",
-       "datasourceUid": "__expr__",
-       "model": {
-        "refId": "B",
-        "type": "reduce",
-        "datasource": {
-         "type": "__expr__",
-         "uid": "__expr__"
-        },
-        "expression": "A",
-        "reducer": "last"
-       }
-      },
-      {
-       "refId": "C",
-       "datasourceUid": "__expr__",
-       "model": {
-        "refId": "C",
-        "type": "threshold",
-        "datasource": {
-         "type": "__expr__",
-         "uid": "__expr__"
-        },
-        "expression": "B",
-        "conditions": [
-         {
-          "evaluator": {
-           "type": "lt",
-           "params": [
-            1
-           ]
-          }
-         }
-        ]
-       }
-      }
-     ]
-    },
-    {
-     "uid": "rpc-monitor-http-4xx",
-     "title": "RPC provider returning HTTP errors",
-     "condition": "C",
-     "for": "1h",
-     "noDataState": "OK",
-     "execErrState": "Error",
-     "labels": {
-      "severity": "warning",
-      "service": "rpc-latency-monitor"
-     },
-     "annotations": {
-      "summary": "{{ $labels.provider }} \u00b7 {{ $labels.error_kind }} \u00b7 {{ $labels.method }} \u00b7 {{ $labels.region }}",
-      "description": "{{ $labels.provider }} returned {{ $labels.error_kind }} for {{ $labels.method }} from {{ $labels.region }} on >5% of requests sustained for 1h+. Excluded from the latency and win % panels. Usually the provider is rate/compute-limiting our key for this method \u2014 raise the plan per-key limit or use a dedicated key.",
-      "runbook": "Confirm via rpc_requests_total by provider, method, region, error_kind. http_429 = rate/CU cap on our key; other 4xx = bad request params for that method."
-     },
-     "data": [
-      {
-       "refId": "A",
-       "relativeTimeRange": {
-        "from": 600,
-        "to": 0
-       },
-       "datasourceUid": "${GRAFANA_DATASOURCE_UID}",
-       "model": {
-        "refId": "A",
-        "datasource": {
-         "type": "prometheus",
-         "uid": "${GRAFANA_DATASOURCE_UID}"
-        },
-        "expr": "100 * (sum by (provider, method, region, error_kind) (rate(rpc_requests_total{error_kind=~\"http_429|http_4xx\"}[10m])) / on (provider, method, region) group_left() sum by (provider, method, region) (rate(rpc_requests_total[10m])))",
-        "instant": true,
-        "intervalMs": 1000,
-        "maxDataPoints": 43200
-       }
-      },
-      {
-       "refId": "B",
-       "datasourceUid": "__expr__",
-       "model": {
-        "refId": "B",
-        "type": "reduce",
-        "datasource": {
-         "type": "__expr__",
-         "uid": "__expr__"
-        },
-        "expression": "A",
-        "reducer": "last"
-       }
-      },
-      {
-       "refId": "C",
-       "datasourceUid": "__expr__",
-       "model": {
-        "refId": "C",
-        "type": "threshold",
-        "datasource": {
-         "type": "__expr__",
-         "uid": "__expr__"
-        },
-        "expression": "B",
-        "conditions": [
-         {
-          "evaluator": {
-           "type": "gt",
-           "params": [
-            5
-           ]
-          }
-         }
-        ]
-       }
-      }
-     ],
-     "keep_firing_for": "2h"
-    },
-    {
-     "uid": "rpc-claim-mismatch",
-     "title": "Provider claim mismatch vs reference node (anti-gaming)",
-     "condition": "C",
-     "for": "30m",
-     "noDataState": "OK",
-     "execErrState": "Error",
-     "labels": {
-      "severity": "warning",
-      "service": "rpc-latency-monitor"
-     },
-     "annotations": {
-      "summary": "{{ $labels.provider }} is systematically failing claim verification (>25 mismatches and >2% of verified claims over 3h)",
-      "description": "Claim verification (anti-gaming layer 2) shows sustained mismatch verdicts for this provider: content it served (blockhash / accounts / transaction / clock) diverges from the reference node at a systemic rate - more than 25 mismatches AND more than 2% of its verified (non-skipped) claims over 3 hours, sustained 30 minutes. Isolated single mismatches no longer fire. Honest on-chain movement is scored 'drift', a lagging reference node is 'skipped' - neither counts here. Investigate before drawing conclusions; this is an internal signal, not a public accusation. Breakdown: rpc_claim_check_total{provider, method, target, result}.",
-      "runbook": "Break down by rpc_claim_check_total{provider, method, target, result} to find which method/target mismatched. Cross-check the reference node's health (rpc_reference_node_lag, pillar alerts) first; then manually replay the claim against the provider and the node before treating it as provider dishonesty. Do not communicate externally without a second confirmed sample."
-     },
-     "data": [
-      {
-       "refId": "A",
-       "relativeTimeRange": {
-        "from": 10800,
-        "to": 0
-       },
-       "datasourceUid": "${GRAFANA_DATASOURCE_UID}",
-       "model": {
-        "refId": "A",
-        "datasource": {
-         "type": "prometheus",
-         "uid": "${GRAFANA_DATASOURCE_UID}"
-        },
-        "expr": "(sum by (provider) (increase(rpc_claim_check_total{result=\"mismatch\",provider!=\"fluxrpc\"}[3h])) > 25) and (sum by (provider) (increase(rpc_claim_check_total{result=\"mismatch\",provider!=\"fluxrpc\"}[3h])) / clamp_min(sum by (provider) (increase(rpc_claim_check_total{result=~\"match|mismatch|drift\",provider!=\"fluxrpc\"}[3h])), 1) > 0.02)",
-        "instant": true,
-        "intervalMs": 1000,
-        "maxDataPoints": 43200
-       }
-      },
-      {
-       "refId": "B",
-       "datasourceUid": "__expr__",
-       "model": {
-        "refId": "B",
-        "type": "reduce",
-        "datasource": {
-         "type": "__expr__",
-         "uid": "__expr__"
-        },
-        "expression": "A",
-        "reducer": "last"
-       }
-      },
-      {
-       "refId": "C",
-       "datasourceUid": "__expr__",
-       "model": {
-        "refId": "C",
-        "type": "threshold",
-        "datasource": {
-         "type": "__expr__",
-         "uid": "__expr__"
-        },
-        "expression": "B",
-        "conditions": [
-         {
-          "type": "query",
-          "evaluator": {
-           "type": "gt",
-           "params": [
-            0.5
-           ]
+      "orgId": 1,
+      "name": "rpc-latency-monitor",
+      "folder": "${GRAFANA_FOLDER_UID}",
+      "interval": "1m",
+      "rules": [
+        {
+          "uid": "rpc-monitor-no-data",
+          "title": "rpc-latency monitor not reporting (dashboard has no data)",
+          "condition": "C",
+          "for": "10m",
+          "noDataState": "Alerting",
+          "execErrState": "Error",
+          "labels": {
+            "severity": "critical",
+            "service": "rpc-latency-monitor"
           },
-          "operator": {
-           "type": "and"
+          "annotations": {
+            "summary": "rpc-latency monitor is not reporting any metrics",
+            "description": "No rpc_up series are present over the last 5m, so the RPC latency dashboards have no data to display. The metrics pipeline (monitor VM, scrape, or remote-write) has stopped. This is independent of any individual provider being down or slow.",
+            "runbook": "Check that the monitor VM is running and exporting metrics, that Prometheus/Alloy is scraping and remote-writing successfully, and that the Grafana datasource is healthy. This alert intentionally ignores per-provider health; it fires only when the dashboards would be blank."
           },
-          "query": {
-           "params": [
-            "C"
-           ]
-          },
-          "reducer": {
-           "type": "last",
-           "params": []
-          }
-         }
-        ]
-       }
-      }
-     ],
-     "keep_firing_for": "2h"
-    },
-    {
-     "uid": "rpc-claim-implausible",
-     "title": "Provider claiming slots ahead of physics (anti-gaming)",
-     "condition": "C",
-     "for": "30m",
-     "noDataState": "OK",
-     "execErrState": "Error",
-     "labels": {
-      "severity": "warning",
-      "service": "rpc-latency-monitor"
-     },
-     "annotations": {
-      "summary": "{{ $labels.provider }} shows a sustained isolated stream of implausible slot claims",
-      "description": "More than 25 implausible verdicts over 3 hours for this provider, sustained 30 minutes, while at most 2 providers show the pattern - an isolated sustained stream is either real gaming or a provider-specific fault. Brief bursts during reference-node tip stutter no longer page per provider; when 3+ providers go implausible together the reference-tip-suspect alert fires instead. Check rpc_reference_node_lag and pillar node health first regardless.",
-      "runbook": "Break down by rpc_claim_check_total{provider, method, target, result} to find which method/target mismatched. Cross-check the reference node's health (rpc_reference_node_lag, pillar alerts) first; then manually replay the claim against the provider and the node before treating it as provider dishonesty. Do not communicate externally without a second confirmed sample."
-     },
-     "data": [
-      {
-       "refId": "A",
-       "relativeTimeRange": {
-        "from": 10800,
-        "to": 0
-       },
-       "datasourceUid": "${GRAFANA_DATASOURCE_UID}",
-       "model": {
-        "refId": "A",
-        "datasource": {
-         "type": "prometheus",
-         "uid": "${GRAFANA_DATASOURCE_UID}"
+          "data": [
+            {
+              "refId": "A",
+              "relativeTimeRange": {
+                "from": 300,
+                "to": 0
+              },
+              "datasourceUid": "${GRAFANA_DATASOURCE_UID}",
+              "model": {
+                "refId": "A",
+                "datasource": {
+                  "type": "prometheus",
+                  "uid": "${GRAFANA_DATASOURCE_UID}"
+                },
+                "expr": "count(rpc_up)",
+                "instant": true,
+                "intervalMs": 1000,
+                "maxDataPoints": 43200
+              }
+            },
+            {
+              "refId": "B",
+              "datasourceUid": "__expr__",
+              "model": {
+                "refId": "B",
+                "type": "reduce",
+                "datasource": {
+                  "type": "__expr__",
+                  "uid": "__expr__"
+                },
+                "expression": "A",
+                "reducer": "last"
+              }
+            },
+            {
+              "refId": "C",
+              "datasourceUid": "__expr__",
+              "model": {
+                "refId": "C",
+                "type": "threshold",
+                "datasource": {
+                  "type": "__expr__",
+                  "uid": "__expr__"
+                },
+                "expression": "B",
+                "conditions": [
+                  {
+                    "evaluator": {
+                      "type": "lt",
+                      "params": [
+                        1
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          ]
         },
-        "expr": "(sum by (provider) (increase(rpc_claim_check_total{result=\"implausible\",provider!=\"fluxrpc\"}[3h])) > 25) and on() (count(sum by (provider) (increase(rpc_claim_check_total{result=\"implausible\",provider!=\"fluxrpc\"}[3h])) > 25) <= 2)",
-        "instant": true,
-        "intervalMs": 1000,
-        "maxDataPoints": 43200
-       }
-      },
-      {
-       "refId": "B",
-       "datasourceUid": "__expr__",
-       "model": {
-        "refId": "B",
-        "type": "reduce",
-        "datasource": {
-         "type": "__expr__",
-         "uid": "__expr__"
+        {
+          "uid": "rpc-monitor-http-4xx",
+          "title": "RPC provider returning HTTP errors",
+          "condition": "C",
+          "for": "1h",
+          "noDataState": "OK",
+          "execErrState": "Error",
+          "labels": {
+            "severity": "warning",
+            "service": "rpc-latency-monitor"
+          },
+          "annotations": {
+            "summary": "{{ $labels.provider }} \u00b7 {{ $labels.error_kind }} \u00b7 {{ $labels.method }} \u00b7 {{ $labels.region }}",
+            "description": "{{ $labels.provider }} returned {{ $labels.error_kind }} for {{ $labels.method }} from {{ $labels.region }} on >5% of requests sustained for 1h+. Excluded from the latency and win % panels. Usually the provider is rate/compute-limiting our key for this method \u2014 raise the plan per-key limit or use a dedicated key.",
+            "runbook": "Confirm via rpc_requests_total by provider, method, region, error_kind. http_429 = rate/CU cap on our key; other 4xx = bad request params for that method."
+          },
+          "data": [
+            {
+              "refId": "A",
+              "relativeTimeRange": {
+                "from": 600,
+                "to": 0
+              },
+              "datasourceUid": "${GRAFANA_DATASOURCE_UID}",
+              "model": {
+                "refId": "A",
+                "datasource": {
+                  "type": "prometheus",
+                  "uid": "${GRAFANA_DATASOURCE_UID}"
+                },
+                "expr": "100 * (sum by (provider, method, region, error_kind) (rate(rpc_requests_total{error_kind=~\"http_429|http_4xx\"}[10m])) / on (provider, method, region) group_left() sum by (provider, method, region) (rate(rpc_requests_total[10m])))",
+                "instant": true,
+                "intervalMs": 1000,
+                "maxDataPoints": 43200
+              }
+            },
+            {
+              "refId": "B",
+              "datasourceUid": "__expr__",
+              "model": {
+                "refId": "B",
+                "type": "reduce",
+                "datasource": {
+                  "type": "__expr__",
+                  "uid": "__expr__"
+                },
+                "expression": "A",
+                "reducer": "last"
+              }
+            },
+            {
+              "refId": "C",
+              "datasourceUid": "__expr__",
+              "model": {
+                "refId": "C",
+                "type": "threshold",
+                "datasource": {
+                  "type": "__expr__",
+                  "uid": "__expr__"
+                },
+                "expression": "B",
+                "conditions": [
+                  {
+                    "evaluator": {
+                      "type": "gt",
+                      "params": [
+                        5
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          ],
+          "keep_firing_for": "2h"
         },
-        "expression": "A",
-        "reducer": "last"
-       }
-      },
-      {
-       "refId": "C",
-       "datasourceUid": "__expr__",
-       "model": {
-        "refId": "C",
-        "type": "threshold",
-        "datasource": {
-         "type": "__expr__",
-         "uid": "__expr__"
+        {
+          "uid": "rpc-claim-mismatch",
+          "title": "Provider claim mismatch vs reference node (anti-gaming)",
+          "condition": "C",
+          "for": "30m",
+          "noDataState": "OK",
+          "execErrState": "Error",
+          "labels": {
+            "severity": "warning",
+            "service": "rpc-latency-monitor"
+          },
+          "annotations": {
+            "summary": "{{ $labels.provider }} is systematically failing claim verification (>25 mismatches and >2% of verified claims over 3h)",
+            "description": "Claim verification (anti-gaming layer 2) shows sustained mismatch verdicts for this provider: content it served (blockhash / accounts / transaction / clock) diverges from the reference node at a systemic rate - more than 25 mismatches AND more than 2% of its verified (non-skipped) claims over 3 hours, sustained 30 minutes. Isolated single mismatches no longer fire. Honest on-chain movement is scored 'drift', a lagging reference node is 'skipped' - neither counts here. Investigate before drawing conclusions; this is an internal signal, not a public accusation. Breakdown: rpc_claim_check_total{provider, method, target, result}.",
+            "runbook": "Break down by rpc_claim_check_total{provider, method, target, result} to find which method/target mismatched. Cross-check the reference node's health (rpc_reference_node_lag, pillar alerts) first; then manually replay the claim against the provider and the node before treating it as provider dishonesty. Do not communicate externally without a second confirmed sample."
+          },
+          "data": [
+            {
+              "refId": "A",
+              "relativeTimeRange": {
+                "from": 10800,
+                "to": 0
+              },
+              "datasourceUid": "${GRAFANA_DATASOURCE_UID}",
+              "model": {
+                "refId": "A",
+                "datasource": {
+                  "type": "prometheus",
+                  "uid": "${GRAFANA_DATASOURCE_UID}"
+                },
+                "expr": "(sum by (provider) (increase(rpc_claim_check_total{result=\"mismatch\",provider!=\"fluxrpc\"}[3h])) > 25) and (sum by (provider) (increase(rpc_claim_check_total{result=\"mismatch\",provider!=\"fluxrpc\"}[3h])) / clamp_min(sum by (provider) (increase(rpc_claim_check_total{result=~\"match|mismatch|drift\",provider!=\"fluxrpc\"}[3h])), 1) > 0.02)",
+                "instant": true,
+                "intervalMs": 1000,
+                "maxDataPoints": 43200
+              }
+            },
+            {
+              "refId": "B",
+              "datasourceUid": "__expr__",
+              "model": {
+                "refId": "B",
+                "type": "reduce",
+                "datasource": {
+                  "type": "__expr__",
+                  "uid": "__expr__"
+                },
+                "expression": "A",
+                "reducer": "last"
+              }
+            },
+            {
+              "refId": "C",
+              "datasourceUid": "__expr__",
+              "model": {
+                "refId": "C",
+                "type": "threshold",
+                "datasource": {
+                  "type": "__expr__",
+                  "uid": "__expr__"
+                },
+                "expression": "B",
+                "conditions": [
+                  {
+                    "type": "query",
+                    "evaluator": {
+                      "type": "gt",
+                      "params": [
+                        0.5
+                      ]
+                    },
+                    "operator": {
+                      "type": "and"
+                    },
+                    "query": {
+                      "params": [
+                        "C"
+                      ]
+                    },
+                    "reducer": {
+                      "type": "last",
+                      "params": []
+                    }
+                  }
+                ]
+              }
+            }
+          ],
+          "keep_firing_for": "2h"
         },
-        "expression": "B",
-        "conditions": [
-         {
-          "type": "query",
-          "evaluator": {
-           "type": "gt",
-           "params": [
-            5
-           ]
+        {
+          "uid": "rpc-claim-implausible",
+          "title": "Provider claiming slots ahead of physics (anti-gaming)",
+          "condition": "C",
+          "for": "30m",
+          "noDataState": "OK",
+          "execErrState": "Error",
+          "labels": {
+            "severity": "warning",
+            "service": "rpc-latency-monitor"
           },
-          "operator": {
-           "type": "and"
+          "annotations": {
+            "summary": "{{ $labels.provider }} shows a sustained isolated stream of implausible slot claims",
+            "description": "More than 25 implausible verdicts over 3 hours for this provider, sustained 30 minutes, while at most 2 providers show the pattern - an isolated sustained stream is either real gaming or a provider-specific fault. Brief bursts during reference-node tip stutter no longer page per provider; when 3+ providers go implausible together the reference-tip-suspect alert fires instead. Check rpc_reference_node_lag and pillar node health first regardless.",
+            "runbook": "Break down by rpc_claim_check_total{provider, method, target, result} to find which method/target mismatched. Cross-check the reference node's health (rpc_reference_node_lag, pillar alerts) first; then manually replay the claim against the provider and the node before treating it as provider dishonesty. Do not communicate externally without a second confirmed sample."
           },
-          "query": {
-           "params": [
-            "C"
-           ]
-          },
-          "reducer": {
-           "type": "last",
-           "params": []
-          }
-         }
-        ]
-       }
-      }
-     ],
-     "keep_firing_for": "2h"
-    },
-    {
-     "uid": "rpc-reference-mismatch",
-     "title": "Provider finalized blockhash mismatch vs reference node",
-     "condition": "C",
-     "for": "0s",
-     "noDataState": "OK",
-     "execErrState": "Error",
-     "labels": {
-      "severity": "warning",
-      "service": "rpc-latency-monitor"
-     },
-     "annotations": {
-      "summary": "{{ $labels.provider }} returned a finalized block whose blockhash differs from the reference node",
-      "description": "The periodic cross-check (getBlock at reference-tip minus depth, finalized commitment) got a different blockhash from this provider than from the reference node. A finalized blockhash is unforgeable; this should never fire for an honest provider. Reference-node unavailability is scored 'skipped' and does not fire this alert.",
-      "runbook": "Compare getBlock(slot, finalized) blockhash from the provider vs the reference node by hand (slot = reference finalized tip - depth at fire time; check rpc_reference_check_total{provider, result} for the counts). A finalized blockhash differing is either a provider serving a wrong chain or a serious bug - escalate either way."
-     },
-     "data": [
-      {
-       "refId": "A",
-       "relativeTimeRange": {
-        "from": 3600,
-        "to": 0
-       },
-       "datasourceUid": "${GRAFANA_DATASOURCE_UID}",
-       "model": {
-        "refId": "A",
-        "datasource": {
-         "type": "prometheus",
-         "uid": "${GRAFANA_DATASOURCE_UID}"
+          "data": [
+            {
+              "refId": "A",
+              "relativeTimeRange": {
+                "from": 10800,
+                "to": 0
+              },
+              "datasourceUid": "${GRAFANA_DATASOURCE_UID}",
+              "model": {
+                "refId": "A",
+                "datasource": {
+                  "type": "prometheus",
+                  "uid": "${GRAFANA_DATASOURCE_UID}"
+                },
+                "expr": "(sum by (provider) (increase(rpc_claim_check_total{result=\"implausible\",provider!=\"fluxrpc\"}[3h])) > 25) and on() (count(sum by (provider) (increase(rpc_claim_check_total{result=\"implausible\",provider!=\"fluxrpc\"}[3h])) > 25) <= 2)",
+                "instant": true,
+                "intervalMs": 1000,
+                "maxDataPoints": 43200
+              }
+            },
+            {
+              "refId": "B",
+              "datasourceUid": "__expr__",
+              "model": {
+                "refId": "B",
+                "type": "reduce",
+                "datasource": {
+                  "type": "__expr__",
+                  "uid": "__expr__"
+                },
+                "expression": "A",
+                "reducer": "last"
+              }
+            },
+            {
+              "refId": "C",
+              "datasourceUid": "__expr__",
+              "model": {
+                "refId": "C",
+                "type": "threshold",
+                "datasource": {
+                  "type": "__expr__",
+                  "uid": "__expr__"
+                },
+                "expression": "B",
+                "conditions": [
+                  {
+                    "type": "query",
+                    "evaluator": {
+                      "type": "gt",
+                      "params": [
+                        5
+                      ]
+                    },
+                    "operator": {
+                      "type": "and"
+                    },
+                    "query": {
+                      "params": [
+                        "C"
+                      ]
+                    },
+                    "reducer": {
+                      "type": "last",
+                      "params": []
+                    }
+                  }
+                ]
+              }
+            }
+          ],
+          "keep_firing_for": "2h"
         },
-        "expr": "sum by (provider) (increase(rpc_reference_check_total{result=\"mismatch\",provider!=\"fluxrpc\"}[1h]))",
-        "instant": true,
-        "intervalMs": 1000,
-        "maxDataPoints": 43200
-       }
-      },
-      {
-       "refId": "B",
-       "datasourceUid": "__expr__",
-       "model": {
-        "refId": "B",
-        "type": "reduce",
-        "datasource": {
-         "type": "__expr__",
-         "uid": "__expr__"
+        {
+          "uid": "rpc-reference-mismatch",
+          "title": "Provider finalized blockhash mismatch vs reference node",
+          "condition": "C",
+          "for": "0s",
+          "noDataState": "OK",
+          "execErrState": "Error",
+          "labels": {
+            "severity": "warning",
+            "service": "rpc-latency-monitor"
+          },
+          "annotations": {
+            "summary": "{{ $labels.provider }} returned a finalized block whose blockhash differs from the reference node",
+            "description": "The periodic cross-check (getBlock at reference-tip minus depth, finalized commitment) got a different blockhash from this provider than from the reference node. A finalized blockhash is unforgeable; this should never fire for an honest provider. Reference-node unavailability is scored 'skipped' and does not fire this alert.",
+            "runbook": "Compare getBlock(slot, finalized) blockhash from the provider vs the reference node by hand (slot = reference finalized tip - depth at fire time; check rpc_reference_check_total{provider, result} for the counts). A finalized blockhash differing is either a provider serving a wrong chain or a serious bug - escalate either way."
+          },
+          "data": [
+            {
+              "refId": "A",
+              "relativeTimeRange": {
+                "from": 3600,
+                "to": 0
+              },
+              "datasourceUid": "${GRAFANA_DATASOURCE_UID}",
+              "model": {
+                "refId": "A",
+                "datasource": {
+                  "type": "prometheus",
+                  "uid": "${GRAFANA_DATASOURCE_UID}"
+                },
+                "expr": "sum by (provider) (increase(rpc_reference_check_total{result=\"mismatch\",provider!=\"fluxrpc\"}[1h]))",
+                "instant": true,
+                "intervalMs": 1000,
+                "maxDataPoints": 43200
+              }
+            },
+            {
+              "refId": "B",
+              "datasourceUid": "__expr__",
+              "model": {
+                "refId": "B",
+                "type": "reduce",
+                "datasource": {
+                  "type": "__expr__",
+                  "uid": "__expr__"
+                },
+                "expression": "A",
+                "reducer": "last"
+              }
+            },
+            {
+              "refId": "C",
+              "datasourceUid": "__expr__",
+              "model": {
+                "refId": "C",
+                "type": "threshold",
+                "datasource": {
+                  "type": "__expr__",
+                  "uid": "__expr__"
+                },
+                "expression": "B",
+                "conditions": [
+                  {
+                    "type": "query",
+                    "evaluator": {
+                      "type": "gt",
+                      "params": [
+                        0.5
+                      ]
+                    },
+                    "operator": {
+                      "type": "and"
+                    },
+                    "query": {
+                      "params": [
+                        "C"
+                      ]
+                    },
+                    "reducer": {
+                      "type": "last",
+                      "params": []
+                    }
+                  }
+                ]
+              }
+            }
+          ]
         },
-        "expression": "A",
-        "reducer": "last"
-       }
-      },
-      {
-       "refId": "C",
-       "datasourceUid": "__expr__",
-       "model": {
-        "refId": "C",
-        "type": "threshold",
-        "datasource": {
-         "type": "__expr__",
-         "uid": "__expr__"
+        {
+          "uid": "rpc-claim-checks-dark",
+          "title": "Claim verification dark (all verdicts skipped)",
+          "condition": "C",
+          "for": "15m",
+          "noDataState": "OK",
+          "execErrState": "Error",
+          "labels": {
+            "severity": "warning",
+            "service": "rpc-latency-monitor"
+          },
+          "annotations": {
+            "summary": "Claim checks are running but nearly every verdict is 'skipped' - verification is effectively off",
+            "description": "More than 95% of claim-check verdicts over 30m were 'skipped'. Claims are flowing (fleet is armed) but the reference node cannot answer the verification queries - node down, lagging beyond node_stale_slots, or its RPC serving path is saturated (getBlock timing out while getHealth stays green, as in the 2026-07-21 un-indexed gPA incident). Providers are unaffected (fail-open), but anti-gaming coverage is zero while this fires.",
+            "runbook": "Check pillar alerts and rpc_reference_node_lag first. If the node looks healthy, test getBlock and getProgramAccounts latency directly on the node - cheap calls staying fast while scans starve means RPC thread saturation; check solRpcEl thread CPU and that --account-index flags are present."
+          },
+          "data": [
+            {
+              "refId": "A",
+              "relativeTimeRange": {
+                "from": 1800,
+                "to": 0
+              },
+              "datasourceUid": "${GRAFANA_DATASOURCE_UID}",
+              "model": {
+                "refId": "A",
+                "datasource": {
+                  "type": "prometheus",
+                  "uid": "${GRAFANA_DATASOURCE_UID}"
+                },
+                "expr": "sum(increase(rpc_claim_check_total{result=\"skipped\"}[30m])) / clamp_min(sum(increase(rpc_claim_check_total[30m])), 1)",
+                "instant": true,
+                "intervalMs": 1000,
+                "maxDataPoints": 43200
+              }
+            },
+            {
+              "refId": "B",
+              "datasourceUid": "__expr__",
+              "model": {
+                "refId": "B",
+                "type": "reduce",
+                "datasource": {
+                  "type": "__expr__",
+                  "uid": "__expr__"
+                },
+                "expression": "A",
+                "reducer": "last"
+              }
+            },
+            {
+              "refId": "C",
+              "datasourceUid": "__expr__",
+              "model": {
+                "refId": "C",
+                "type": "threshold",
+                "datasource": {
+                  "type": "__expr__",
+                  "uid": "__expr__"
+                },
+                "expression": "B",
+                "conditions": [
+                  {
+                    "type": "query",
+                    "evaluator": {
+                      "type": "gt",
+                      "params": [
+                        0.95
+                      ]
+                    },
+                    "operator": {
+                      "type": "and"
+                    },
+                    "query": {
+                      "params": [
+                        "C"
+                      ]
+                    },
+                    "reducer": {
+                      "type": "last",
+                      "params": []
+                    }
+                  }
+                ]
+              }
+            }
+          ]
         },
-        "expression": "B",
-        "conditions": [
-         {
-          "type": "query",
-          "evaluator": {
-           "type": "gt",
-           "params": [
-            0.5
-           ]
+        {
+          "uid": "rpc-reference-tip-suspect",
+          "title": "Reference tip suspect (multi-provider implausible)",
+          "condition": "C",
+          "for": "0s",
+          "noDataState": "OK",
+          "execErrState": "Error",
+          "labels": {
+            "severity": "warning",
+            "service": "rpc-latency-monitor"
           },
-          "operator": {
-           "type": "and"
+          "annotations": {
+            "summary": "3+ providers scored implausible in the last hour - the reference tip itself is suspect",
+            "description": "Three or more providers simultaneously claiming slots ahead of the reference tip is definitionally a reference-node problem (stuck or catching-up tip), not coordinated gaming. Per-provider implausible alerts are inhibited in this state. Check rpc_reference_node_lag, pillar node health, and recent validator restarts on rpc-node-eu."
           },
-          "query": {
-           "params": [
-            "C"
-           ]
-          },
-          "reducer": {
-           "type": "last",
-           "params": []
-          }
-         }
-        ]
-       }
-      }
-     ]
-    },
-    {
-     "uid": "rpc-claim-checks-dark",
-     "title": "Claim verification dark (all verdicts skipped)",
-     "condition": "C",
-     "for": "15m",
-     "noDataState": "OK",
-     "execErrState": "Error",
-     "labels": {
-      "severity": "warning",
-      "service": "rpc-latency-monitor"
-     },
-     "annotations": {
-      "summary": "Claim checks are running but nearly every verdict is 'skipped' - verification is effectively off",
-      "description": "More than 95% of claim-check verdicts over 30m were 'skipped'. Claims are flowing (fleet is armed) but the reference node cannot answer the verification queries - node down, lagging beyond node_stale_slots, or its RPC serving path is saturated (getBlock timing out while getHealth stays green, as in the 2026-07-21 un-indexed gPA incident). Providers are unaffected (fail-open), but anti-gaming coverage is zero while this fires.",
-      "runbook": "Check pillar alerts and rpc_reference_node_lag first. If the node looks healthy, test getBlock and getProgramAccounts latency directly on the node - cheap calls staying fast while scans starve means RPC thread saturation; check solRpcEl thread CPU and that --account-index flags are present."
-     },
-     "data": [
-      {
-       "refId": "A",
-       "relativeTimeRange": {
-        "from": 1800,
-        "to": 0
-       },
-       "datasourceUid": "${GRAFANA_DATASOURCE_UID}",
-       "model": {
-        "refId": "A",
-        "datasource": {
-         "type": "prometheus",
-         "uid": "${GRAFANA_DATASOURCE_UID}"
+          "data": [
+            {
+              "refId": "A",
+              "relativeTimeRange": {
+                "from": 3600,
+                "to": 0
+              },
+              "datasourceUid": "${GRAFANA_DATASOURCE_UID}",
+              "model": {
+                "refId": "A",
+                "datasource": {
+                  "type": "prometheus",
+                  "uid": "${GRAFANA_DATASOURCE_UID}"
+                },
+                "expr": "count(sum by (provider) (increase(rpc_claim_check_total{result=\"implausible\",provider!=\"fluxrpc\"}[1h])) > 5) >= 3",
+                "instant": true,
+                "intervalMs": 1000,
+                "maxDataPoints": 43200
+              }
+            },
+            {
+              "refId": "B",
+              "datasourceUid": "__expr__",
+              "model": {
+                "refId": "B",
+                "type": "reduce",
+                "datasource": {
+                  "type": "__expr__",
+                  "uid": "__expr__"
+                },
+                "expression": "A",
+                "reducer": "last"
+              }
+            },
+            {
+              "refId": "C",
+              "datasourceUid": "__expr__",
+              "model": {
+                "refId": "C",
+                "type": "threshold",
+                "datasource": {
+                  "type": "__expr__",
+                  "uid": "__expr__"
+                },
+                "expression": "B",
+                "conditions": [
+                  {
+                    "type": "query",
+                    "evaluator": {
+                      "type": "gt",
+                      "params": [
+                        5
+                      ]
+                    },
+                    "operator": {
+                      "type": "and"
+                    },
+                    "query": {
+                      "params": [
+                        "C"
+                      ]
+                    },
+                    "reducer": {
+                      "type": "last",
+                      "params": []
+                    }
+                  }
+                ]
+              }
+            }
+          ],
+          "keep_firing_for": "2h"
         },
-        "expr": "sum(increase(rpc_claim_check_total{result=\"skipped\"}[30m])) / clamp_min(sum(increase(rpc_claim_check_total[30m])), 1)",
-        "instant": true,
-        "intervalMs": 1000,
-        "maxDataPoints": 43200
-       }
-      },
-      {
-       "refId": "B",
-       "datasourceUid": "__expr__",
-       "model": {
-        "refId": "B",
-        "type": "reduce",
-        "datasource": {
-         "type": "__expr__",
-         "uid": "__expr__"
-        },
-        "expression": "A",
-        "reducer": "last"
-       }
-      },
-      {
-       "refId": "C",
-       "datasourceUid": "__expr__",
-       "model": {
-        "refId": "C",
-        "type": "threshold",
-        "datasource": {
-         "type": "__expr__",
-         "uid": "__expr__"
-        },
-        "expression": "B",
-        "conditions": [
-         {
-          "type": "query",
-          "evaluator": {
-           "type": "gt",
-           "params": [
-            0.95
-           ]
+        {
+          "uid": "rpc-provider-dark",
+          "title": "RPC provider dark (was reporting, now no successes)",
+          "condition": "C",
+          "for": "15m",
+          "noDataState": "OK",
+          "execErrState": "Error",
+          "labels": {
+            "severity": "warning",
+            "service": "rpc-latency-monitor",
+            "error_kind": "dark",
+            "method": "all"
           },
-          "operator": {
-           "type": "and"
+          "annotations": {
+            "summary": "{{ $labels.provider }} \u00b7 dark \u00b7 {{ $labels.infra }}",
+            "description": "{{ $labels.provider }} produced successful probes from {{ $labels.infra }} 24h ago but none in the last 30m. Either the provider's series vanished (probe/config removed) or every request fails (e.g. dead API key). Latency panels silently drop the provider in both cases.",
+            "runbook": "Check rpc_requests_total{provider=\"{{ $labels.provider }}\", infra=\"{{ $labels.infra }}\"} by status/error_kind. No series at all = provider missing from deployed config (compare deploy/gcp/config.yaml on app main vs what boxes run). Series with zero success = credential/endpoint failure; test the key directly."
           },
-          "query": {
-           "params": [
-            "C"
-           ]
-          },
-          "reducer": {
-           "type": "last",
-           "params": []
-          }
-         }
-        ]
-       }
-      }
-     ]
-    },
-    {
-     "uid": "rpc-reference-tip-suspect",
-     "title": "Reference tip suspect (multi-provider implausible)",
-     "condition": "C",
-     "for": "0s",
-     "noDataState": "OK",
-     "execErrState": "Error",
-     "labels": {
-      "severity": "warning",
-      "service": "rpc-latency-monitor"
-     },
-     "annotations": {
-      "summary": "3+ providers scored implausible in the last hour - the reference tip itself is suspect",
-      "description": "Three or more providers simultaneously claiming slots ahead of the reference tip is definitionally a reference-node problem (stuck or catching-up tip), not coordinated gaming. Per-provider implausible alerts are inhibited in this state. Check rpc_reference_node_lag, pillar node health, and recent validator restarts on rpc-node-eu."
-     },
-     "data": [
-      {
-       "refId": "A",
-       "relativeTimeRange": {
-        "from": 3600,
-        "to": 0
-       },
-       "datasourceUid": "${GRAFANA_DATASOURCE_UID}",
-       "model": {
-        "refId": "A",
-        "datasource": {
-         "type": "prometheus",
-         "uid": "${GRAFANA_DATASOURCE_UID}"
-        },
-        "expr": "count(sum by (provider) (increase(rpc_claim_check_total{result=\"implausible\",provider!=\"fluxrpc\"}[1h])) > 5) >= 3",
-        "instant": true,
-        "intervalMs": 1000,
-        "maxDataPoints": 43200
-       }
-      },
-      {
-       "refId": "B",
-       "datasourceUid": "__expr__",
-       "model": {
-        "refId": "B",
-        "type": "reduce",
-        "datasource": {
-         "type": "__expr__",
-         "uid": "__expr__"
-        },
-        "expression": "A",
-        "reducer": "last"
-       }
-      },
-      {
-       "refId": "C",
-       "datasourceUid": "__expr__",
-       "model": {
-        "refId": "C",
-        "type": "threshold",
-        "datasource": {
-         "type": "__expr__",
-         "uid": "__expr__"
-        },
-        "expression": "B",
-        "conditions": [
-         {
-          "type": "query",
-          "evaluator": {
-           "type": "gt",
-           "params": [
-            5
-           ]
-          },
-          "operator": {
-           "type": "and"
-          },
-          "query": {
-           "params": [
-            "C"
-           ]
-          },
-          "reducer": {
-           "type": "last",
-           "params": []
-          }
-         }
-        ]
-       }
-      }
-     ],
-     "keep_firing_for": "2h"
+          "data": [
+            {
+              "refId": "A",
+              "relativeTimeRange": {
+                "from": 600,
+                "to": 0
+              },
+              "datasourceUid": "${GRAFANA_DATASOURCE_UID}",
+              "model": {
+                "refId": "A",
+                "datasource": {
+                  "type": "prometheus",
+                  "uid": "${GRAFANA_DATASOURCE_UID}"
+                },
+                "expr": "(sum by (provider, infra) (increase(rpc_requests_total{status=\"success\"}[30m] offset 1d)) > 0) unless (sum by (provider, infra) (rate(rpc_requests_total{status=\"success\"}[30m])) > 0)",
+                "instant": true,
+                "intervalMs": 1000,
+                "maxDataPoints": 43200
+              }
+            },
+            {
+              "refId": "B",
+              "datasourceUid": "__expr__",
+              "model": {
+                "refId": "B",
+                "type": "reduce",
+                "datasource": {
+                  "type": "__expr__",
+                  "uid": "__expr__"
+                },
+                "expression": "A",
+                "reducer": "last"
+              }
+            },
+            {
+              "refId": "C",
+              "datasourceUid": "__expr__",
+              "model": {
+                "refId": "C",
+                "type": "threshold",
+                "datasource": {
+                  "type": "__expr__",
+                  "uid": "__expr__"
+                },
+                "expression": "B",
+                "conditions": [
+                  {
+                    "evaluator": {
+                      "type": "gt",
+                      "params": [
+                        5
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          ],
+          "keep_firing_for": "2h"
+        }
+      ]
     }
-   ]
-  }
- ]
+  ]
 }
