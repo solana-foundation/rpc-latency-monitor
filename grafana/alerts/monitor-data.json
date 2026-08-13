@@ -668,7 +668,7 @@
                     "evaluator": {
                       "type": "gt",
                       "params": [
-                        5
+                        0
                       ]
                     }
                   }
