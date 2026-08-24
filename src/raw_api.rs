@@ -97,8 +97,7 @@ pub async fn serve(config: RawApiConfig) -> anyhow::Result<()> {
         windows: Mutex::new(HashMap::new()),
         upstream: tokio::sync::Semaphore::new(MAX_UPSTREAM_CONCURRENCY),
     });
-    ensure_schema(&state).await?;
-    tokio::spawn(retention_loop(state.clone()));
+    tokio::spawn(schema_then_retention(state.clone()));
     let app = Router::new()
         .route("/raw/{template}", get(raw_handler))
         .route("/ingest/samples", post(ingest_handler))
@@ -525,6 +524,19 @@ async fn ensure_schema(state: &Arc<AppState>) -> anyhow::Result<()> {
         .batch_execute(include_str!("../deploy/migrations/0001_probe_samples.sql"))
         .await?;
     Ok(())
+}
+
+async fn schema_then_retention(state: Arc<AppState>) {
+    loop {
+        match ensure_schema(&state).await {
+            Ok(()) => break,
+            Err(error) => {
+                tracing::warn!(%error, "schema apply failed, retrying in 30s");
+                tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+            }
+        }
+    }
+    retention_loop(state).await;
 }
 
 async fn retention_loop(state: Arc<AppState>) {

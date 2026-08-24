@@ -9,6 +9,7 @@ use crate::rpc::{CallResult, CallStatus};
 const BUFFER: usize = 4096;
 const FLUSH_ROWS: usize = 500;
 const FLUSH_SECONDS: u64 = 30;
+const MAX_BUFFERED: usize = 2000;
 
 #[derive(Clone)]
 pub struct SampleLogger {
@@ -115,12 +116,18 @@ async fn flush(client: &reqwest::Client, url: &str, token: &str, buffer: &mut Ve
     let response = client
         .post(url)
         .header("Authorization", format!("Bearer {token}"))
-        .json(&serde_json::json!({ "rows": rows }))
+        .json(&serde_json::json!({ "rows": &rows }))
         .send()
         .await;
-    match response {
-        Ok(r) if r.status().is_success() => {}
-        Ok(r) => tracing::warn!(status = %r.status(), count, "sample flush rejected"),
-        Err(error) => tracing::warn!(%error, count, "sample flush failed"),
+    let failure = match response {
+        Ok(r) if r.status().is_success() => return,
+        Ok(r) => format!("rejected with {}", r.status()),
+        Err(error) => error.to_string(),
+    };
+    if count + buffer.len() <= MAX_BUFFERED {
+        tracing::warn!(%failure, count, "sample flush failed, will retry");
+        buffer.splice(0..0, rows);
+    } else {
+        tracing::warn!(%failure, count, "sample flush failed, buffer full, dropping batch");
     }
 }
