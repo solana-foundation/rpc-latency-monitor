@@ -67,11 +67,57 @@ deploy_fleet() {
     done
 }
 
+RAW_API_PATHS="src/raw_api.rs src/bin/raw-api.rs Cargo.toml Cargo.lock deploy/Dockerfile"
+
+deploy_raw_api() {
+  : "${RAW_API_JWT_SECRET:?set via Doppler}"
+  : "${RAW_API_GRAFANA_TOKEN:?set via Doppler}"
+  : "${GRAFANA_API_URL:?set via Doppler}"
+  local deployed image
+  deployed="$(gcloud run services describe rpc-raw-api --project "$PROJECT" --region "$REGION" \
+    --format 'value(spec.template.spec.containers[0].image)' 2>/dev/null || true)"
+
+  if [ "$TARGET" = "all" ]; then
+    if [ -z "$IMAGE_SHA" ]; then
+      echo "raw-api: no IMAGE_SHA on a full deploy — leaving the current revision in place"
+      return 0
+    fi
+    local deployed_sha="${deployed##*:}"
+    if [ -n "$deployed_sha" ] && [ "$deployed_sha" != "latest" ] \
+      && git cat-file -e "${deployed_sha}^{commit}" 2>/dev/null \
+      && git cat-file -e "${IMAGE_SHA}^{commit}" 2>/dev/null; then
+      # shellcheck disable=SC2086
+      if ! git diff --name-only "$deployed_sha" "$IMAGE_SHA" -- $RAW_API_PATHS | grep -q .; then
+        echo "raw-api unchanged between $deployed_sha and $IMAGE_SHA — skipping (dispatch target=rawapi to force)"
+        return 0
+      fi
+    fi
+  fi
+
+  if [ -n "$IMAGE_SHA" ]; then
+    image="${REGION}-docker.pkg.dev/${PROJECT}/rpc-latency-monitor/rpc-latency-monitor:${IMAGE_SHA}"
+  else
+    image="$deployed"
+  fi
+  case "$image" in
+    ""|*:latest)
+      echo "refusing to deploy raw-api: need an immutable image (set IMAGE_SHA; no :latest, no prior revision)" >&2
+      exit 1 ;;
+  esac
+  echo "deploying rpc-raw-api image: $image"
+  gcloud run deploy rpc-raw-api --project "$PROJECT" --region "$REGION" \
+    --image "$image" --command raw-api --port 8080 \
+    --min-instances 0 --max-instances 1 --cpu 1 --memory 256Mi \
+    --allow-unauthenticated --quiet \
+    --set-env-vars "^@^GRAFANA_API_URL=${GRAFANA_API_URL}@GRAFANA_DATASOURCE_UID=${GRAFANA_DATASOURCE_UID:-grafanacloud-prom}@RAW_API_JWT_SECRET=${RAW_API_JWT_SECRET}@RAW_API_GRAFANA_TOKEN=${RAW_API_GRAFANA_TOKEN}"
+}
+
 case "$TARGET" in
   alerts) push_alerts ;;
   fleet) deploy_fleet ;;
-  all) push_alerts; deploy_fleet ;;
-  *) echo "unknown TARGET: $TARGET (want: all|fleet|alerts)" >&2; exit 1 ;;
+  rawapi) deploy_raw_api ;;
+  all) push_alerts; deploy_fleet; deploy_raw_api ;;
+  *) echo "unknown TARGET: $TARGET (want: all|fleet|alerts|rawapi)" >&2; exit 1 ;;
 esac
 
 echo "ops deploy complete (target=$TARGET)"

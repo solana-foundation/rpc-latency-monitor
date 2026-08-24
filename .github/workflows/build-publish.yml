@@ -67,8 +67,6 @@ jobs:
           SHA="$(git rev-parse --short HEAD)"
           COMMIT_MSG=$(git log -1 --format=%s HEAD 2>/dev/null | cut -c1-140 || echo "")
           FIELDS=$(jq -n \
-            --arg target     "all" \
-            --arg scope      "all" \
             --arg image      "$SHA" \
             --arg short_sha  "$SHA" \
             --arg commit_msg "$COMMIT_MSG" \
@@ -76,8 +74,6 @@ jobs:
             --arg run_url    "$RUN_URL" \
             --arg run_id     "${{ github.run_id }}" \
             '[
-              {type:"mrkdwn",text:("*Target:*\n`"+$target+"`")},
-              {type:"mrkdwn",text:("*Provider:*\n`"+$scope+"`")},
               {type:"mrkdwn",text:("*Image:*\n`"+$image+"`")},
               {type:"mrkdwn",text:("*Commit:*\n`"+$short_sha+"` — "+$commit_msg)},
               {type:"mrkdwn",text:("*Triggered by:*\n"+$actor)},
@@ -93,13 +89,11 @@ jobs:
         if: env.SLACK_WEBHOOK != ''
         run: |
           PAYLOAD=$(jq -n \
-            --arg marker "[STARTED] Deploy RPC Latency Monitor" \
-            --arg target "all" \
-            --arg scope "all" \
+            --arg marker "[STARTED] Build & Publish RPC Latency Monitor" \
             --arg color "#36a64f" \
             --argjson fields '${{ steps.summary.outputs.fields }}' \
             '{
-              text: ("*" + $marker + "* — target: `" + $target + "` provider: `" + $scope + "`"),
+              text: ("*" + $marker + "*"),
               attachments: [{
                 color: $color,
                 blocks: [
@@ -150,13 +144,11 @@ jobs:
         if: failure() && env.SLACK_WEBHOOK != ''
         run: |
           PAYLOAD=$(jq -n \
-            --arg marker "[FAILED] Deploy RPC Latency Monitor" \
-            --arg target "all" \
-            --arg scope "all" \
+            --arg marker "[FAILED] Build & Publish RPC Latency Monitor" \
             --arg color "#ff0000" \
             --argjson fields '${{ steps.summary.outputs.fields }}' \
             '{
-              text: ("*" + $marker + "* — target: `" + $target + "` provider: `" + $scope + "`"),
+              text: ("*" + $marker + "*"),
               attachments: [{
                 color: $color,
                 blocks: [

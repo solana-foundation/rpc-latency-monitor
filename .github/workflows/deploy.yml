@@ -6,7 +6,7 @@ on:
       target:
         description: "What to deploy"
         type: choice
-        options: [all, fleet, alerts]
+        options: [all, fleet, alerts, rawapi]
         default: all
         required: true
       image_sha:
@@ -40,12 +40,14 @@ jobs:
     environment: prod
     env:
       TARGET: ${{ github.event.inputs.target || 'all' }}
-      PROVIDER: ${{ github.event.inputs.target == 'alerts' && 'gcp' || github.event.inputs.provider || 'all' }}
+      PROVIDER: ${{ (github.event.inputs.target == 'alerts' || github.event.inputs.target == 'rawapi') && 'gcp' || github.event.inputs.provider || 'all' }}
       DOPPLER_PROJECT: rpc-latency-monitor
       DOPPLER_CONFIG: prd
       REGION: us-east4
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
 
       - name: Resolve image sha
         id: image

@@ -11,7 +11,7 @@ repository = "https://github.com/solana-foundation/rpc-latency-monitor"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "time", "sync", "net"] }
 
 # HTTP: outbound RPC client + inbound metrics/health server
-reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"] }
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls", "query"] }
 axum = "0.8"
 
 # Serialization / config. YAML parsing is provided by figment's `yaml` feature,
@@ -26,6 +26,9 @@ prometheus = "0.14"
 
 base64 = "0.22"
 bs58 = "0.5"
+hmac = "0.12"
+sha2 = "0.10"
+humantime = "2"
 
 # Observability
 tracing = "0.1"
