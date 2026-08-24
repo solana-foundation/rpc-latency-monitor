@@ -6,7 +6,7 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
-use axum::routing::get;
+use axum::routing::{get, post};
 use axum::{Json, Router};
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
@@ -30,6 +30,22 @@ const TEMPLATES: &[&str] = &[
     "requests",
     "win_rate",
     "claim_checks",
+    "samples",
+];
+const DEFAULT_SAMPLE_LIMIT: u64 = 1000;
+const MAX_SAMPLE_LIMIT: u64 = 10000;
+const MAX_INGEST_ROWS: usize = 1000;
+const SAMPLE_FIELDS: &[&str] = &[
+    "ts",
+    "provider",
+    "method",
+    "infra",
+    "region",
+    "target",
+    "status",
+    "error_kind",
+    "latency_ms",
+    "slot",
 ];
 
 pub struct RawApiConfig {
@@ -38,6 +54,7 @@ pub struct RawApiConfig {
     pub grafana_url: String,
     pub grafana_token: String,
     pub datasource_uid: String,
+    pub bq_project: String,
 }
 
 impl RawApiConfig {
@@ -55,6 +72,8 @@ impl RawApiConfig {
                 .or_else(|_| need("GRAFANA_API_TOKEN"))?,
             datasource_uid: std::env::var("GRAFANA_DATASOURCE_UID")
                 .unwrap_or_else(|_| "grafanacloud-prom".to_string()),
+            bq_project: std::env::var("RAW_API_BQ_PROJECT")
+                .unwrap_or_else(|_| "rpc-latency-monitor".to_string()),
         })
     }
 }
@@ -81,6 +100,7 @@ pub async fn serve(config: RawApiConfig) -> anyhow::Result<()> {
     });
     let app = Router::new()
         .route("/raw/{template}", get(raw_handler))
+        .route("/ingest/samples", post(ingest_handler))
         .route("/health", get(|| async { "ok" }))
         .with_state(state);
     let listener = tokio::net::TcpListener::bind(bind).await?;
@@ -136,6 +156,37 @@ async fn raw_handler(
         )
             .into_response();
     };
+
+    if query.template == "samples" {
+        let rows = match query_samples(&state, &query).await {
+            Ok(rows) => rows,
+            Err(error) => {
+                tracing::error!(%error, "samples query failed");
+                return error_response(StatusCode::BAD_GATEWAY, "upstream query failed");
+            }
+        };
+        if query.format == "csv" {
+            return (
+                StatusCode::OK,
+                [
+                    ("Content-Type", "text/csv; charset=utf-8".to_string()),
+                    ("Cache-Control", "no-store".to_string()),
+                ],
+                rows_to_csv(&rows),
+            )
+                .into_response();
+        }
+        return (
+            StatusCode::OK,
+            [("Cache-Control", "no-store")],
+            Json(json!({
+                "generatedAt": humantime::format_rfc3339_seconds(SystemTime::now()).to_string(),
+                "template": query.template,
+                "rows": rows,
+            })),
+        )
+            .into_response();
+    }
 
     let series = match run_query(&state, &query).await {
         Ok(series) => series,
@@ -241,12 +292,14 @@ pub struct RawQuery {
     pub method: Option<String>,
     pub infra: Option<String>,
     pub region: Option<String>,
+    pub status: Option<String>,
     pub start: u64,
     pub end: u64,
     pub step: u64,
     pub quantiles: Vec<String>,
     pub by: String,
     pub format: String,
+    pub limit: u64,
 }
 
 pub fn parse_query(template: &str, params: &HashMap<String, String>) -> Result<RawQuery, String> {
@@ -268,6 +321,7 @@ pub fn parse_query(template: &str, params: &HashMap<String, String>) -> Result<R
     let method = label("method")?;
     let infra = label("infra")?;
     let region = label("region")?;
+    let status = label("status")?;
 
     if region.is_some() && infra.is_none() {
         return Err("region requires infra".to_string());
@@ -354,19 +408,251 @@ pub fn parse_query(template: &str, params: &HashMap<String, String>) -> Result<R
         return Err(format!("invalid format \"{format}\"; use json or csv"));
     }
 
+    let limit = match params.get("limit") {
+        None => DEFAULT_SAMPLE_LIMIT,
+        Some(v) => {
+            let limit: u64 = v.parse().map_err(|_| format!("invalid limit \"{v}\""))?;
+            if limit == 0 || limit > MAX_SAMPLE_LIMIT {
+                return Err(format!("limit must be between 1 and {MAX_SAMPLE_LIMIT}"));
+            }
+            limit
+        }
+    };
+
     Ok(RawQuery {
         template: template.to_string(),
         provider,
         method,
         infra,
         region,
+        status,
         start,
         end,
         step,
         quantiles,
         by,
         format,
+        limit,
     })
+}
+
+#[derive(Deserialize, serde::Serialize)]
+struct IngestRow {
+    ts: f64,
+    provider: String,
+    method: String,
+    infra: String,
+    region: String,
+    #[serde(default)]
+    target: String,
+    status: String,
+    error_kind: String,
+    latency_ms: f64,
+    #[serde(default)]
+    slot: Option<u64>,
+}
+
+#[derive(Deserialize)]
+struct IngestBody {
+    rows: Vec<IngestRow>,
+}
+
+async fn ingest_handler(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(body): Json<IngestBody>,
+) -> Response {
+    let token = headers
+        .get("authorization")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .map(str::trim);
+    match token.and_then(|t| verify_token(t, &state.config.jwt_secret)) {
+        Some(sub) if sub == "fleet" => {}
+        Some(_) => return error_response(StatusCode::FORBIDDEN, "ingest requires the fleet token"),
+        None => {
+            return error_response(
+                StatusCode::UNAUTHORIZED,
+                "invalid, expired, or missing token",
+            )
+        }
+    }
+    if body.rows.is_empty() || body.rows.len() > MAX_INGEST_ROWS {
+        return error_response(
+            StatusCode::BAD_REQUEST,
+            &format!("rows must contain 1..={MAX_INGEST_ROWS} entries"),
+        );
+    }
+    for row in &body.rows {
+        let labels = [
+            &row.provider,
+            &row.method,
+            &row.infra,
+            &row.region,
+            &row.status,
+            &row.error_kind,
+        ];
+        if labels.iter().any(|v| !is_valid_label_value(v))
+            || !(row.target.is_empty() || is_valid_label_value(&row.target))
+            || !row.ts.is_finite()
+            || !row.latency_ms.is_finite()
+        {
+            return error_response(StatusCode::BAD_REQUEST, "invalid row values");
+        }
+    }
+    match bq_insert(&state, &body.rows).await {
+        Ok(()) => (StatusCode::OK, Json(json!({"ok": true}))).into_response(),
+        Err(error) => {
+            tracing::error!(%error, "sample ingest failed");
+            error_response(StatusCode::BAD_GATEWAY, "storage insert failed")
+        }
+    }
+}
+
+async fn gcp_token(state: &AppState) -> anyhow::Result<String> {
+    let payload: Value = state
+        .http
+        .get("http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token")
+        .header("Metadata-Flavor", "Google")
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?;
+    payload["access_token"]
+        .as_str()
+        .map(str::to_string)
+        .ok_or_else(|| anyhow::anyhow!("metadata token response missing access_token"))
+}
+
+async fn bq_insert(state: &AppState, rows: &[IngestRow]) -> anyhow::Result<()> {
+    let token = gcp_token(state).await?;
+    let url = format!(
+        "https://bigquery.googleapis.com/bigquery/v2/projects/{}/datasets/raw/tables/probe_samples/insertAll",
+        state.config.bq_project
+    );
+    let body = json!({
+        "rows": rows.iter().map(|row| json!({"json": row})).collect::<Vec<_>>()
+    });
+    let payload: Value = state
+        .http
+        .post(&url)
+        .header("Authorization", format!("Bearer {token}"))
+        .json(&body)
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?;
+    if payload
+        .get("insertErrors")
+        .and_then(Value::as_array)
+        .is_some_and(|errors| !errors.is_empty())
+    {
+        anyhow::bail!("insertAll reported row errors");
+    }
+    Ok(())
+}
+
+fn bq_param(name: &str, kind: &str, value: String) -> Value {
+    json!({
+        "name": name,
+        "parameterType": {"type": kind},
+        "parameterValue": {"value": value},
+    })
+}
+
+async fn query_samples(state: &AppState, query: &RawQuery) -> anyhow::Result<Vec<Value>> {
+    let token = gcp_token(state).await?;
+    let mut sql = format!(
+        "SELECT UNIX_SECONDS(ts) AS ts, provider, method, infra, region, target, status, error_kind, latency_ms, slot FROM `{}.raw.probe_samples` WHERE ts >= TIMESTAMP_SECONDS(@start) AND ts < TIMESTAMP_SECONDS(@end)",
+        state.config.bq_project
+    );
+    let mut parameters = vec![
+        bq_param("start", "INT64", query.start.to_string()),
+        bq_param("end", "INT64", query.end.to_string()),
+    ];
+    let filters = [
+        ("provider", &query.provider),
+        ("method", &query.method),
+        ("infra", &query.infra),
+        ("region", &query.region),
+        ("status", &query.status),
+    ];
+    for (name, value) in filters {
+        if let Some(value) = value {
+            sql.push_str(&format!(" AND {name} = @{name}"));
+            parameters.push(bq_param(name, "STRING", value.clone()));
+        }
+    }
+    sql.push_str(&format!(" ORDER BY ts DESC LIMIT {}", query.limit));
+    let body = json!({
+        "query": sql,
+        "useLegacySql": false,
+        "parameterMode": "NAMED",
+        "queryParameters": parameters,
+        "timeoutMs": 25000,
+        "maxResults": query.limit,
+    });
+    let payload: Value = state
+        .http
+        .post(format!(
+            "https://bigquery.googleapis.com/bigquery/v2/projects/{}/queries",
+            state.config.bq_project
+        ))
+        .header("Authorization", format!("Bearer {token}"))
+        .json(&body)
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?;
+    if payload["jobComplete"] != json!(true) {
+        anyhow::bail!("query did not complete in time");
+    }
+    let empty = vec![];
+    let rows = payload["rows"].as_array().unwrap_or(&empty);
+    Ok(rows
+        .iter()
+        .map(|row| {
+            let mut object = serde_json::Map::new();
+            for (i, field) in SAMPLE_FIELDS.iter().enumerate() {
+                let value = &row["f"][i]["v"];
+                let converted = match value.as_str() {
+                    None => Value::Null,
+                    Some(v) if matches!(*field, "ts" | "latency_ms" | "slot") => {
+                        v.parse::<f64>().map(|n| json!(n)).unwrap_or(Value::Null)
+                    }
+                    Some(v) => json!(v),
+                };
+                object.insert(field.to_string(), converted);
+            }
+            Value::Object(object)
+        })
+        .collect())
+}
+
+fn rows_to_csv(rows: &[Value]) -> String {
+    let mut out = vec![SAMPLE_FIELDS.join(",")];
+    for row in rows {
+        out.push(
+            SAMPLE_FIELDS
+                .iter()
+                .map(|field| {
+                    let value = &row[*field];
+                    if value.is_null() {
+                        String::new()
+                    } else if let Some(s) = value.as_str() {
+                        escape_csv(s)
+                    } else {
+                        value.to_string()
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join(","),
+        );
+    }
+    out.join("\n")
 }
 
 fn is_valid_label_value(value: &str) -> bool {
