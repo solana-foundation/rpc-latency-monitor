@@ -3,6 +3,7 @@ pub mod geo;
 pub mod gpa_derive;
 pub mod metrics;
 pub mod providers;
+pub mod raw_api;
 pub mod reference_check;
 pub mod reference_slot;
 pub mod rpc;
