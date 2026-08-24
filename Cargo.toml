@@ -29,6 +29,7 @@ bs58 = "0.5"
 hmac = "0.12"
 sha2 = "0.10"
 humantime = "2"
+tokio-postgres = "0.7"
 
 # Observability
 tracing = "0.1"

@@ -54,7 +54,7 @@ pub struct RawApiConfig {
     pub grafana_url: String,
     pub grafana_token: String,
     pub datasource_uid: String,
-    pub bq_project: String,
+    pub database_url: String,
 }
 
 impl RawApiConfig {
@@ -72,8 +72,7 @@ impl RawApiConfig {
                 .or_else(|_| need("GRAFANA_API_TOKEN"))?,
             datasource_uid: std::env::var("GRAFANA_DATASOURCE_UID")
                 .unwrap_or_else(|_| "grafanacloud-prom".to_string()),
-            bq_project: std::env::var("RAW_API_BQ_PROJECT")
-                .unwrap_or_else(|_| "rpc-latency-monitor".to_string()),
+            database_url: need("SAMPLES_DATABASE_URL")?,
         })
     }
 }
@@ -98,6 +97,8 @@ pub async fn serve(config: RawApiConfig) -> anyhow::Result<()> {
         windows: Mutex::new(HashMap::new()),
         upstream: tokio::sync::Semaphore::new(MAX_UPSTREAM_CONCURRENCY),
     });
+    ensure_schema(&state).await?;
+    tokio::spawn(retention_loop(state.clone()));
     let app = Router::new()
         .route("/raw/{template}", get(raw_handler))
         .route("/ingest/samples", post(ingest_handler))
@@ -500,7 +501,7 @@ async fn ingest_handler(
             return error_response(StatusCode::BAD_REQUEST, "invalid row values");
         }
     }
-    match bq_insert(&state, &body.rows).await {
+    match insert_samples(&state, &body.rows).await {
         Ok(()) => (StatusCode::OK, Json(json!({"ok": true}))).into_response(),
         Err(error) => {
             tracing::error!(%error, "sample ingest failed");
@@ -509,69 +510,88 @@ async fn ingest_handler(
     }
 }
 
-async fn gcp_token(state: &AppState) -> anyhow::Result<String> {
-    let payload: Value = state
-        .http
-        .get("http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token")
-        .header("Metadata-Flavor", "Google")
-        .send()
-        .await?
-        .error_for_status()?
-        .json()
-        .await?;
-    payload["access_token"]
-        .as_str()
-        .map(str::to_string)
-        .ok_or_else(|| anyhow::anyhow!("metadata token response missing access_token"))
+async fn pg_connect(state: &AppState) -> anyhow::Result<tokio_postgres::Client> {
+    let (client, connection) =
+        tokio_postgres::connect(&state.config.database_url, tokio_postgres::NoTls).await?;
+    tokio::spawn(async move {
+        let _ = connection.await;
+    });
+    Ok(client)
 }
 
-async fn bq_insert(state: &AppState, rows: &[IngestRow]) -> anyhow::Result<()> {
-    let token = gcp_token(state).await?;
-    let url = format!(
-        "https://bigquery.googleapis.com/bigquery/v2/projects/{}/datasets/raw/tables/probe_samples/insertAll",
-        state.config.bq_project
-    );
-    let body = json!({
-        "rows": rows.iter().map(|row| json!({"json": row})).collect::<Vec<_>>()
-    });
-    let payload: Value = state
-        .http
-        .post(&url)
-        .header("Authorization", format!("Bearer {token}"))
-        .json(&body)
-        .send()
-        .await?
-        .error_for_status()?
-        .json()
+async fn ensure_schema(state: &Arc<AppState>) -> anyhow::Result<()> {
+    let client = pg_connect(state).await?;
+    client
+        .batch_execute(include_str!("../deploy/migrations/0001_probe_samples.sql"))
         .await?;
-    if payload
-        .get("insertErrors")
-        .and_then(Value::as_array)
-        .is_some_and(|errors| !errors.is_empty())
-    {
-        anyhow::bail!("insertAll reported row errors");
-    }
     Ok(())
 }
 
-fn bq_param(name: &str, kind: &str, value: String) -> Value {
-    json!({
-        "name": name,
-        "parameterType": {"type": kind},
-        "parameterValue": {"value": value},
-    })
+async fn retention_loop(state: Arc<AppState>) {
+    let mut tick = tokio::time::interval(std::time::Duration::from_secs(24 * 60 * 60));
+    loop {
+        tick.tick().await;
+        match pg_connect(&state).await {
+            Ok(client) => {
+                if let Err(error) = client
+                    .execute(
+                        "DELETE FROM probe_samples WHERE ts < now() - interval '400 days'",
+                        &[],
+                    )
+                    .await
+                {
+                    tracing::warn!(%error, "sample retention delete failed");
+                }
+            }
+            Err(error) => tracing::warn!(%error, "sample retention connect failed"),
+        }
+    }
+}
+
+async fn insert_samples(state: &AppState, rows: &[IngestRow]) -> anyhow::Result<()> {
+    let client = pg_connect(state).await?;
+    let ts: Vec<f64> = rows.iter().map(|r| r.ts).collect();
+    let provider: Vec<&str> = rows.iter().map(|r| r.provider.as_str()).collect();
+    let method: Vec<&str> = rows.iter().map(|r| r.method.as_str()).collect();
+    let infra: Vec<&str> = rows.iter().map(|r| r.infra.as_str()).collect();
+    let region: Vec<&str> = rows.iter().map(|r| r.region.as_str()).collect();
+    let target: Vec<&str> = rows.iter().map(|r| r.target.as_str()).collect();
+    let status: Vec<&str> = rows.iter().map(|r| r.status.as_str()).collect();
+    let error_kind: Vec<&str> = rows.iter().map(|r| r.error_kind.as_str()).collect();
+    let latency_ms: Vec<f64> = rows.iter().map(|r| r.latency_ms).collect();
+    let slot: Vec<Option<i64>> = rows.iter().map(|r| r.slot.map(|v| v as i64)).collect();
+    client
+        .execute(
+            "INSERT INTO probe_samples (ts, provider, method, infra, region, target, status, error_kind, latency_ms, slot) \
+             SELECT to_timestamp(t), p, m, i, r, tg, st, e, l, sl \
+             FROM UNNEST($1::float8[], $2::text[], $3::text[], $4::text[], $5::text[], $6::text[], $7::text[], $8::text[], $9::float8[], $10::int8[]) \
+             AS x(t, p, m, i, r, tg, st, e, l, sl)",
+            &[
+                &ts,
+                &provider,
+                &method,
+                &infra,
+                &region,
+                &target,
+                &status,
+                &error_kind,
+                &latency_ms,
+                &slot,
+            ],
+        )
+        .await?;
+    Ok(())
 }
 
 async fn query_samples(state: &AppState, query: &RawQuery) -> anyhow::Result<Vec<Value>> {
-    let token = gcp_token(state).await?;
-    let mut sql = format!(
-        "SELECT UNIX_SECONDS(ts) AS ts, provider, method, infra, region, target, status, error_kind, latency_ms, slot FROM `{}.raw.probe_samples` WHERE ts >= TIMESTAMP_SECONDS(@start) AND ts < TIMESTAMP_SECONDS(@end)",
-        state.config.bq_project
+    let client = pg_connect(state).await?;
+    let mut sql = String::from(
+        "SELECT extract(epoch from ts)::float8 AS ts, provider, method, infra, region, target, status, error_kind, latency_ms, slot \
+         FROM probe_samples WHERE ts >= to_timestamp($1) AND ts < to_timestamp($2)",
     );
-    let mut parameters = vec![
-        bq_param("start", "INT64", query.start.to_string()),
-        bq_param("end", "INT64", query.end.to_string()),
-    ];
+    let start = query.start as f64;
+    let end = query.end as f64;
+    let mut params: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> = vec![&start, &end];
     let filters = [
         ("provider", &query.provider),
         ("method", &query.method),
@@ -579,55 +599,29 @@ async fn query_samples(state: &AppState, query: &RawQuery) -> anyhow::Result<Vec
         ("region", &query.region),
         ("status", &query.status),
     ];
-    for (name, value) in filters {
+    for (name, value) in &filters {
         if let Some(value) = value {
-            sql.push_str(&format!(" AND {name} = @{name}"));
-            parameters.push(bq_param(name, "STRING", value.clone()));
+            params.push(value);
+            sql.push_str(&format!(" AND {name} = ${}", params.len()));
         }
     }
     sql.push_str(&format!(" ORDER BY ts DESC LIMIT {}", query.limit));
-    let body = json!({
-        "query": sql,
-        "useLegacySql": false,
-        "parameterMode": "NAMED",
-        "queryParameters": parameters,
-        "timeoutMs": 25000,
-        "maxResults": query.limit,
-    });
-    let payload: Value = state
-        .http
-        .post(format!(
-            "https://bigquery.googleapis.com/bigquery/v2/projects/{}/queries",
-            state.config.bq_project
-        ))
-        .header("Authorization", format!("Bearer {token}"))
-        .json(&body)
-        .send()
-        .await?
-        .error_for_status()?
-        .json()
-        .await?;
-    if payload["jobComplete"] != json!(true) {
-        anyhow::bail!("query did not complete in time");
-    }
-    let empty = vec![];
-    let rows = payload["rows"].as_array().unwrap_or(&empty);
+    let rows = client.query(&sql, &params).await?;
     Ok(rows
         .iter()
         .map(|row| {
-            let mut object = serde_json::Map::new();
-            for (i, field) in SAMPLE_FIELDS.iter().enumerate() {
-                let value = &row["f"][i]["v"];
-                let converted = match value.as_str() {
-                    None => Value::Null,
-                    Some(v) if matches!(*field, "ts" | "latency_ms" | "slot") => {
-                        v.parse::<f64>().map(|n| json!(n)).unwrap_or(Value::Null)
-                    }
-                    Some(v) => json!(v),
-                };
-                object.insert(field.to_string(), converted);
-            }
-            Value::Object(object)
+            json!({
+                "ts": row.get::<_, f64>("ts"),
+                "provider": row.get::<_, &str>("provider"),
+                "method": row.get::<_, &str>("method"),
+                "infra": row.get::<_, &str>("infra"),
+                "region": row.get::<_, &str>("region"),
+                "target": row.get::<_, &str>("target"),
+                "status": row.get::<_, &str>("status"),
+                "error_kind": row.get::<_, &str>("error_kind"),
+                "latency_ms": row.get::<_, f64>("latency_ms"),
+                "slot": row.get::<_, Option<i64>>("slot"),
+            })
         })
         .collect())
 }

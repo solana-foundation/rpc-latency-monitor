@@ -67,12 +67,13 @@ deploy_fleet() {
     done
 }
 
-RAW_API_PATHS="src/raw_api.rs src/bin/raw-api.rs Cargo.toml Cargo.lock deploy/Dockerfile"
+RAW_API_PATHS="src/raw_api.rs src/bin/raw-api.rs deploy/migrations Cargo.toml Cargo.lock deploy/Dockerfile"
 
 deploy_raw_api() {
   : "${RAW_API_JWT_SECRET:?set via Doppler}"
   : "${RAW_API_GRAFANA_TOKEN:?set via Doppler}"
   : "${GRAFANA_API_URL:?set via Doppler}"
+  : "${SAMPLES_DATABASE_URL:?set via Doppler}"
   local deployed image
   deployed="$(gcloud run services describe rpc-raw-api --project "$PROJECT" --region "$REGION" \
     --format 'value(spec.template.spec.containers[0].image)' 2>/dev/null || true)"
@@ -109,7 +110,8 @@ deploy_raw_api() {
     --image "$image" --command raw-api --port 8080 \
     --min-instances 0 --max-instances 1 --cpu 1 --memory 256Mi \
     --allow-unauthenticated --quiet \
-    --set-env-vars "^@^GRAFANA_API_URL=${GRAFANA_API_URL}@GRAFANA_DATASOURCE_UID=${GRAFANA_DATASOURCE_UID:-grafanacloud-prom}@RAW_API_JWT_SECRET=${RAW_API_JWT_SECRET}@RAW_API_GRAFANA_TOKEN=${RAW_API_GRAFANA_TOKEN}"
+    --add-cloudsql-instances "${PROJECT}:${REGION}:rpc-raw-samples" \
+    --set-env-vars "^@^GRAFANA_API_URL=${GRAFANA_API_URL}@GRAFANA_DATASOURCE_UID=${GRAFANA_DATASOURCE_UID:-grafanacloud-prom}@RAW_API_JWT_SECRET=${RAW_API_JWT_SECRET}@RAW_API_GRAFANA_TOKEN=${RAW_API_GRAFANA_TOKEN}@SAMPLES_DATABASE_URL=${SAMPLES_DATABASE_URL}"
 }
 
 case "$TARGET" in
