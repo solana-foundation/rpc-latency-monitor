@@ -12,6 +12,7 @@ use crate::reference_check::ClaimSink;
 use crate::reference_slot::{ArchivalAnchor, ReferenceSlot};
 use crate::rpc::methods::RpcMethod;
 use crate::rpc::{CallResult, CallStatus, ErrorKind, RequestContext, RpcClient};
+use crate::sample_log::SampleLogger;
 
 #[allow(clippy::too_many_arguments)]
 pub fn spawn_checks(
@@ -22,6 +23,7 @@ pub fn spawn_checks(
     reference: ReferenceSlot,
     max_slot_lag: u64,
     claims: Option<ClaimSink>,
+    samples: Option<SampleLogger>,
     gpa_targets: Vec<GpaTarget>,
     gpa_derive: Option<GpaDeriveConfig>,
     archival_anchor: ArchivalAnchor,
@@ -56,6 +58,7 @@ pub fn spawn_checks(
                 shared: shared.clone(),
                 max_slot_lag,
                 claims: claims.clone(),
+                samples: samples.clone(),
                 gpa_targets: gpa_targets.clone(),
                 derived_gpa: derived_gpa.clone(),
                 archival_anchor: archival_anchor.clone(),
@@ -94,6 +97,7 @@ struct CheckTask {
     shared: SharedState,
     max_slot_lag: u64,
     claims: Option<ClaimSink>,
+    samples: Option<SampleLogger>,
     gpa_targets: Arc<Vec<GpaTarget>>,
     derived_gpa: DerivedTargets,
     archival_anchor: ArchivalAnchor,
@@ -156,6 +160,9 @@ impl CheckTask {
         };
         self.metrics
             .record_call(&self.provider, method, result, status, target);
+        if let Some(samples) = &self.samples {
+            samples.log(&self.provider, method, status, target, result);
+        }
 
         if status.is_success() {
             if let Some(sink) = &self.claims {

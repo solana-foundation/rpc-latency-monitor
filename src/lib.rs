@@ -7,5 +7,6 @@ pub mod raw_api;
 pub mod reference_check;
 pub mod reference_slot;
 pub mod rpc;
+pub mod sample_log;
 pub mod scheduler;
 pub mod server;
