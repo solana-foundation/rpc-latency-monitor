@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROVIDER="${PROVIDER:-${1:-all}}"
 TARGET="${TARGET:-all}"
-if [ "$TARGET" = "alerts" ]; then
+if [ "$TARGET" = "alerts" ] || [ "$TARGET" = "rawapi" ]; then
   PROVIDER=gcp
 fi
 
