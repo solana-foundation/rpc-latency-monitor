@@ -313,7 +313,7 @@ async fn timed_archival_block(
                 .and_then(Value::as_str)
                 .filter(|s| !s.is_empty())
                 .map(str::to_owned);
-            let sig = first_signature(&value);
+            let sig = RpcMethod::GetBlockArchival.archival_signature(&value);
             let status = if hash.is_some() {
                 CallStatus::Success
             } else {
@@ -335,19 +335,6 @@ async fn timed_archival_block(
             None,
         ),
     }
-}
-
-fn first_signature(block: &Value) -> Option<String> {
-    block
-        .get("transactions")?
-        .as_array()?
-        .first()?
-        .get("transaction")?
-        .get("signatures")?
-        .as_array()?
-        .first()?
-        .as_str()
-        .map(str::to_owned)
 }
 
 async fn timed_archival_tx(
