@@ -11,7 +11,7 @@ Partner-facing read API over the monitor's Prometheus time series. No raw reques
 | `latency` | `histogram_quantile` per provider, ms | `q` ⊆ `0.5,0.9,0.95,0.99` (default `0.5,0.95,0.99`) |
 | `latency_buckets` | raw histogram bucket increases by provider/le | — |
 | `requests` | request counts by provider + status or error_kind | `by=status\|error_kind` (default `status`) |
-| `win_rate` | per-provider fastest-at-timestamp share | — |
+| `win_rate` | per-provider fastest-at-timestamp share; the denominator is every timestamp where any provider reported, so missing samples count against a provider | — |
 | `claim_checks` | `rpc_claim_check_total` increases by provider/method/result | no `infra`/`region` (metric has neither) |
 
 Common params: `provider`, `method`, `region` (requires `infra`), `infra` — raw label values as stored (e.g. `region=fra2`, `infra=tsw`); `start`/`end` (unix seconds or RFC 3339, default last 24h); `step` (seconds, min 60, default range/500); `format=json|csv`.
@@ -33,7 +33,7 @@ Revocation = rotate the secret (revokes all tokens).
 
 - **Never runs on the fleet boxes or the reference node.** Deploy as its own service on separate compute; a flood of API traffic must not be able to touch probe timing or claim verification. The monitor and this API share a repo and an image, nothing else.
 - **Blast radius is Grafana Cloud's query API only.** The service holds a read-only *viewer* token (`RAW_API_GRAFANA_TOKEN`, a dedicated service account — falls back to `GRAFANA_API_TOKEN` only if unset; don't do that in prod) so Grafana-side per-token rate limits sandbox it away from the token the dashboards and alert provisioning use.
-- **Flood control:** unauthenticated requests are rejected before any upstream call; 60 req/min per token (fixed window, 429 + Retry-After); at most 8 in-flight upstream queries globally (extra requests get 503 + Retry-After); 30s upstream timeout.
+- **Flood control:** unauthenticated requests are rejected before any upstream call; 60 req/min per partner — keyed by `sub`, so multiple tokens minted for one partner share a window and can't multiply quota (fixed window, 429 + Retry-After); at most 8 in-flight upstream queries globally (extra requests get 503 + Retry-After); 30s upstream timeout.
 
 ## Running
 

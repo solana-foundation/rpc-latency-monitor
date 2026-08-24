@@ -313,9 +313,9 @@ pub fn parse_query(template: &str, params: &HashMap<String, String>) -> Result<R
             step
         }
     };
-    if range / step > MAX_POINTS {
+    if range / step + 1 > MAX_POINTS {
         return Err(format!(
-            "too many points; keep (end - start) / step at or below {MAX_POINTS}"
+            "too many points; keep the inclusive point count at or below {MAX_POINTS}"
         ));
     }
 
@@ -598,6 +598,7 @@ fn compute_win_rates(series: Vec<Value>) -> Vec<Value> {
             }
         }
     }
+    let total_timestamps = winners.len() as u64;
     series
         .into_iter()
         .map(|entry| {
@@ -617,8 +618,8 @@ fn compute_win_rates(series: Vec<Value>) -> Vec<Value> {
                         .unwrap_or(false)
                 })
                 .count() as u64;
-            let win_pct = if samples > 0 {
-                (10000.0 * wins as f64 / samples as f64).round() / 100.0
+            let win_pct = if total_timestamps > 0 {
+                (10000.0 * wins as f64 / total_timestamps as f64).round() / 100.0
             } else {
                 0.0
             };
@@ -626,6 +627,7 @@ fn compute_win_rates(series: Vec<Value>) -> Vec<Value> {
                 "labels": entry["labels"],
                 "wins": wins,
                 "samples": samples,
+                "totalTimestamps": total_timestamps,
                 "winPct": win_pct,
             })
         })
@@ -770,6 +772,22 @@ mod tests {
             build_selector(&q, &["status=\"success\""]),
             "{status=\"success\",provider=\"fluxrpc\",infra=\"tsw\",region=\"fra2\"}"
         );
+    }
+
+    #[test]
+    fn win_rate_missing_timestamps_count_against() {
+        let series = vec![
+            json!({"labels": {"provider": "a"}, "points": [[1u64, 10.0], [2u64, 10.0]]}),
+            json!({"labels": {"provider": "b"}, "points": [[2u64, 5.0]]}),
+        ];
+        let out = compute_win_rates(series);
+        assert_eq!(out[0]["wins"], 1);
+        assert_eq!(out[0]["samples"], 2);
+        assert_eq!(out[0]["winPct"], 50.0);
+        assert_eq!(out[1]["wins"], 1);
+        assert_eq!(out[1]["samples"], 1);
+        assert_eq!(out[1]["winPct"], 50.0);
+        assert_eq!(out[1]["totalTimestamps"], 2);
     }
 
     #[test]
