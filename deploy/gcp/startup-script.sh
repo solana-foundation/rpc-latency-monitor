@@ -1,6 +1,15 @@
 #!/bin/bash
 set -euo pipefail
 
+retry() {
+  local n=0
+  until "$@"; do
+    n=$((n + 1))
+    [ "$n" -ge 5 ] && return 1
+    sleep $((n * 10))
+  done
+}
+
 export DOCKER_CONFIG=/tmp/docker
 mkdir -p "$DOCKER_CONFIG"
 
@@ -21,7 +30,10 @@ REGISTRY_HOST="${IMAGE%%/*}"
 ACCESS_TOKEN="$(curl -s -H "Metadata-Flavor: Google" \
   "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token" \
   | sed -n 's/.*"access_token":"\([^"]*\)".*/\1/p')"
-echo "$ACCESS_TOKEN" | docker login -u oauth2accesstoken --password-stdin "https://${REGISTRY_HOST}"
+docker_login() {
+  echo "$ACCESS_TOKEN" | docker login -u oauth2accesstoken --password-stdin "https://${REGISTRY_HOST}"
+}
+retry docker_login
 
 rm -rf "$CONF_DIR"
 mkdir -p "$CONF_DIR"

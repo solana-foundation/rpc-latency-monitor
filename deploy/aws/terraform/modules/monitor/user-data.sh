@@ -1,7 +1,16 @@
 #!/bin/bash
 set -euo pipefail
 
-dnf install -y docker
+retry() {
+  local n=0
+  until "$@"; do
+    n=$((n + 1))
+    [ "$n" -ge 5 ] && return 1
+    sleep $((n * 10))
+  done
+}
+
+retry dnf install -y docker
 systemctl enable --now docker
 
 export IMAGE="${monitor_image}"
