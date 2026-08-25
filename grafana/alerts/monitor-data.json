@@ -677,6 +677,81 @@
             }
           ],
           "keep_firing_for": "2h"
+        },
+        {
+          "uid": "rpc-sample-ingest-failing",
+          "title": "Sample ingest failing (raw-api or its database unhealthy)",
+          "condition": "C",
+          "for": "15m",
+          "noDataState": "OK",
+          "execErrState": "Error",
+          "labels": {
+            "severity": "warning",
+            "service": "rpc-latency-monitor"
+          },
+          "annotations": {
+            "summary": "Fleet sample flushes are failing - probe samples are not reaching storage",
+            "description": "More than 10 sample-log batch flushes across the fleet failed, were rejected, or were dropped in the last 30 minutes, sustained 15 minutes. The fleet buffers about 2 hours per box, then drops. This is the end-to-end health signal for the raw-api ingest path: it fires when the Cloud Run service is down, Cloud SQL is unavailable, the fleet token expired, or egress is broken. Aggregate metrics in Prometheus are unaffected.",
+            "runbook": "Check the raw-api service first: curl /health on rpc-raw-api (Cloud Run, us-east4). 502s on ingest = Cloud SQL down or SAMPLES_DATABASE_URL broken (Cloud Run logs show the pg error). 401/403 = SAMPLE_LOG_TOKEN expired or RAW_API_JWT_SECRET rotated without re-minting the fleet token. Breakdown: rpc_sample_flush_total by result and region."
+          },
+          "data": [
+            {
+              "refId": "A",
+              "relativeTimeRange": {
+                "from": 300,
+                "to": 0
+              },
+              "datasourceUid": "${GRAFANA_DATASOURCE_UID}",
+              "model": {
+                "refId": "A",
+                "datasource": {
+                  "type": "prometheus",
+                  "uid": "${GRAFANA_DATASOURCE_UID}"
+                },
+                "expr": "sum(increase(rpc_sample_flush_total{result=~\"failed|rejected|dropped\"}[30m]))",
+                "instant": true,
+                "intervalMs": 1000,
+                "maxDataPoints": 43200
+              }
+            },
+            {
+              "refId": "B",
+              "datasourceUid": "__expr__",
+              "model": {
+                "refId": "B",
+                "type": "reduce",
+                "datasource": {
+                  "type": "__expr__",
+                  "uid": "__expr__"
+                },
+                "expression": "A",
+                "reducer": "last"
+              }
+            },
+            {
+              "refId": "C",
+              "datasourceUid": "__expr__",
+              "model": {
+                "refId": "C",
+                "type": "threshold",
+                "datasource": {
+                  "type": "__expr__",
+                  "uid": "__expr__"
+                },
+                "expression": "B",
+                "conditions": [
+                  {
+                    "evaluator": {
+                      "type": "gt",
+                      "params": [
+                        10
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          ]
         }
       ]
     }

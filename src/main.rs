@@ -65,7 +65,8 @@ async fn main() -> anyhow::Result<()> {
         config.claim_checks,
     );
     let archival_anchor = ArchivalAnchor::default();
-    let samples = rpc_latency_monitor::sample_log::SampleLogger::from_env(&config.region);
+    let samples =
+        rpc_latency_monitor::sample_log::SampleLogger::from_env(&config.region, metrics.clone());
     scheduler::spawn_checks(
         &endpoints,
         &config.checks,

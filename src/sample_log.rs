@@ -3,6 +3,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use serde::Serialize;
 use tokio::sync::mpsc;
 
+use crate::metrics::Metrics;
 use crate::rpc::methods::RpcMethod;
 use crate::rpc::{CallResult, CallStatus};
 
@@ -33,7 +34,7 @@ struct Sample {
 }
 
 impl SampleLogger {
-    pub fn from_env(region: &str) -> Option<Self> {
+    pub fn from_env(region: &str, metrics: Metrics) -> Option<Self> {
         let url = std::env::var("SAMPLE_LOG_URL")
             .ok()
             .filter(|v| !v.is_empty())?;
@@ -42,7 +43,7 @@ impl SampleLogger {
             .filter(|v| !v.is_empty())?;
         let infra = std::env::var("MONITOR_INFRA").unwrap_or_else(|_| "gcp".to_string());
         let (tx, rx) = mpsc::channel(BUFFER);
-        tokio::spawn(flush_loop(url, token, rx));
+        tokio::spawn(flush_loop(url, token, rx, metrics));
         tracing::info!("sample logging enabled");
         Some(Self {
             tx,
@@ -78,7 +79,7 @@ impl SampleLogger {
     }
 }
 
-async fn flush_loop(url: String, token: String, mut rx: mpsc::Receiver<Sample>) {
+async fn flush_loop(url: String, token: String, mut rx: mpsc::Receiver<Sample>, metrics: Metrics) {
     let Ok(client) = reqwest::Client::builder()
         .timeout(Duration::from_secs(20))
         .build()
@@ -93,24 +94,30 @@ async fn flush_loop(url: String, token: String, mut rx: mpsc::Receiver<Sample>) 
                 Some(sample) => {
                     buffer.push(sample);
                     if buffer.len() >= FLUSH_ROWS {
-                        flush(&client, &url, &token, &mut buffer).await;
+                        flush(&client, &url, &token, &mut buffer, &metrics).await;
                     }
                 }
                 None => {
-                    flush(&client, &url, &token, &mut buffer).await;
+                    flush(&client, &url, &token, &mut buffer, &metrics).await;
                     return;
                 }
             },
             _ = tick.tick() => {
                 if !buffer.is_empty() {
-                    flush(&client, &url, &token, &mut buffer).await;
+                    flush(&client, &url, &token, &mut buffer, &metrics).await;
                 }
             }
         }
     }
 }
 
-async fn flush(client: &reqwest::Client, url: &str, token: &str, buffer: &mut Vec<Sample>) {
+async fn flush(
+    client: &reqwest::Client,
+    url: &str,
+    token: &str,
+    buffer: &mut Vec<Sample>,
+    metrics: &Metrics,
+) {
     let rows = std::mem::take(buffer);
     let count = rows.len();
     let response = client
@@ -120,14 +127,24 @@ async fn flush(client: &reqwest::Client, url: &str, token: &str, buffer: &mut Ve
         .send()
         .await;
     let failure = match response {
-        Ok(r) if r.status().is_success() => return,
-        Ok(r) => format!("rejected with {}", r.status()),
-        Err(error) => error.to_string(),
+        Ok(r) if r.status().is_success() => {
+            metrics.record_sample_flush("ok", 1);
+            return;
+        }
+        Ok(r) => {
+            metrics.record_sample_flush("rejected", 1);
+            format!("rejected with {}", r.status())
+        }
+        Err(error) => {
+            metrics.record_sample_flush("failed", 1);
+            error.to_string()
+        }
     };
     if count + buffer.len() <= MAX_BUFFERED {
         tracing::warn!(%failure, count, "sample flush failed, will retry");
         buffer.splice(0..0, rows);
     } else {
+        metrics.record_sample_flush("dropped", 1);
         tracing::warn!(%failure, count, "sample flush failed, buffer full, dropping batch");
     }
 }

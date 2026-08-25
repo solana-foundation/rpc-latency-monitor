@@ -23,6 +23,7 @@ pub struct Metrics {
     reference_check: IntCounterVec,
     claim_check: IntCounterVec,
     reference_node_lag: IntGauge,
+    sample_flush: IntCounterVec,
 }
 
 impl Metrics {
@@ -79,8 +80,17 @@ impl Metrics {
             "Slots the reference node trails the fleet-observed chain tip",
         )?;
 
+        let sample_flush = IntCounterVec::new(
+            Opts::new(
+                "rpc_sample_flush_total",
+                "Sample-log batches by outcome: ok, failed, rejected, dropped",
+            ),
+            &["result"],
+        )?;
+
         registry.register(Box::new(claim_check.clone()))?;
         registry.register(Box::new(reference_node_lag.clone()))?;
+        registry.register(Box::new(sample_flush.clone()))?;
 
         Ok(Self {
             registry,
@@ -91,6 +101,7 @@ impl Metrics {
             reference_check,
             claim_check,
             reference_node_lag,
+            sample_flush,
         })
     }
 
@@ -104,6 +115,12 @@ impl Metrics {
         self.claim_check
             .with_label_values(&[provider, method.label(), target, result])
             .inc();
+    }
+
+    pub fn record_sample_flush(&self, result: &str, batches: u64) {
+        self.sample_flush
+            .with_label_values(&[result])
+            .inc_by(batches);
     }
 
     pub fn set_reference_node_lag(&self, lag: u64) {
