@@ -5,6 +5,8 @@ resource "google_compute_instance" "monitor" {
   zone         = each.value
   depends_on   = [google_project_service.compute, google_project_iam_member.monitor_ar_reader]
 
+  allow_stopping_for_update = true
+
   boot_disk {
     initialize_params {
       image = "projects/cos-cloud/global/images/family/cos-stable"
