@@ -17,7 +17,7 @@ variable "locations" {
 
 variable "machine_type" {
   type    = string
-  default = "e2-small"
+  default = "e2-medium"
 }
 
 variable "monitor_image" {
