@@ -37,11 +37,11 @@ first=1
 for m in $MODULES; do
   [ "$first" -eq 1 ] || sleep "$RESET_DELAY"
   first=0
-  terraform -chdir="$TF_DIR" apply -auto-approve -refresh=false \
+  terraform -chdir="$TF_DIR" apply -auto-approve -refresh=false -parallelism=1 \
     -target="module.${m}" -var "monitor_image=${image}"
   echo "rolled module.${m}"
 done
 
-terraform -chdir="$TF_DIR" apply -auto-approve -var "monitor_image=${image}"
+terraform -chdir="$TF_DIR" apply -auto-approve -parallelism=1 -var "monitor_image=${image}"
 
 echo "aws deploy complete"

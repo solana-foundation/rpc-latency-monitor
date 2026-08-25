@@ -51,7 +51,7 @@ deploy_fleet() {
   echo "deploying image: $image"
 
   TF_VAR_doppler_token="${MONITOR_DOPPLER_TOKEN}" \
-    terraform -chdir="$TF_DIR" apply -auto-approve \
+    terraform -chdir="$TF_DIR" apply -auto-approve -parallelism=1 \
       -var "project_id=${PROJECT}" -var "monitor_image=${image}"
 
   RESET_DELAY="${RESET_DELAY:-75}"
