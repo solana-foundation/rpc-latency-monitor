@@ -27,11 +27,13 @@ export CONF_DIR=/var/lib/rpc-latency-monitor
 docker rm -f rpc-monitor alloy >/dev/null 2>&1 || true
 
 REGISTRY_HOST="${IMAGE%%/*}"
-ACCESS_TOKEN="$(curl -s -H "Metadata-Flavor: Google" \
-  "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token" \
-  | sed -n 's/.*"access_token":"\([^"]*\)".*/\1/p')"
 docker_login() {
-  echo "$ACCESS_TOKEN" | docker login -u oauth2accesstoken --password-stdin "https://${REGISTRY_HOST}"
+  local access_token
+  access_token="$(curl -fsS -H "Metadata-Flavor: Google" \
+    "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token" \
+    | sed -n 's/.*"access_token":"\([^"]*\)".*/\1/p')"
+  [ -n "$access_token" ] || return 1
+  echo "$access_token" | docker login -u oauth2accesstoken --password-stdin "https://${REGISTRY_HOST}"
 }
 retry docker_login
 
