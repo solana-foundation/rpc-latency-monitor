@@ -35,6 +35,10 @@ resource "aws_instance" "monitor" {
   iam_instance_profile        = var.instance_profile
   user_data_replace_on_change = true
 
+  credit_specification {
+    cpu_credits = "unlimited"
+  }
+
   user_data = "${templatefile("${path.module}/user-data.sh", {
     monitor_image      = var.monitor_image
     monitor_region     = var.region_label

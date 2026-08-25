@@ -677,6 +677,82 @@
             }
           ],
           "keep_firing_for": "2h"
+        },
+        {
+          "uid": "rpc-monitor-region-dark",
+          "title": "Monitor region dark (box stopped reporting)",
+          "condition": "C",
+          "for": "15m",
+          "noDataState": "OK",
+          "execErrState": "Error",
+          "labels": {
+            "severity": "warning",
+            "service": "rpc-latency-monitor"
+          },
+          "annotations": {
+            "summary": "{{ $labels.infra }} \u00b7 {{ $labels.region }} stopped reporting",
+            "description": "This infra/region published rpc_up within the last 7 days but has no series now, sustained 15 minutes - one vantage box stopped publishing metrics (or its monitor stopped running) while sibling regions stay up. Keeps firing for up to 7 days of ongoing outage. Neither the global no-data alert nor provider-dark catches a single dark region; aws ran at 2 of 7 regions for days unnoticed before this rule existed.",
+            "runbook": "Find the box from the labels. aws: check CloudWatch CPUCreditBalance first - zero + SSM commands failing with no output = t3 credit exhaustion (fix: modify-instance-credit-specification CpuCredits=unlimited; reboots do NOT restore credits). Otherwise reboot/reset the box (re-pulls image, config, secrets) and check Alloy remote_write logs.",
+            "runbook_url": "https://www.notion.so/3c6d36dad52d81d1b058f896b4d67aa6"
+          },
+          "data": [
+            {
+              "refId": "A",
+              "relativeTimeRange": {
+                "from": 300,
+                "to": 0
+              },
+              "datasourceUid": "${GRAFANA_DATASOURCE_UID}",
+              "model": {
+                "refId": "A",
+                "datasource": {
+                  "type": "prometheus",
+                  "uid": "${GRAFANA_DATASOURCE_UID}"
+                },
+                "expr": "(count by (infra, region) (last_over_time(rpc_up[7d]))) unless (count by (infra, region) (rpc_up))",
+                "instant": true,
+                "intervalMs": 1000,
+                "maxDataPoints": 43200
+              }
+            },
+            {
+              "refId": "B",
+              "datasourceUid": "__expr__",
+              "model": {
+                "refId": "B",
+                "type": "reduce",
+                "datasource": {
+                  "type": "__expr__",
+                  "uid": "__expr__"
+                },
+                "expression": "A",
+                "reducer": "last"
+              }
+            },
+            {
+              "refId": "C",
+              "datasourceUid": "__expr__",
+              "model": {
+                "refId": "C",
+                "type": "threshold",
+                "datasource": {
+                  "type": "__expr__",
+                  "uid": "__expr__"
+                },
+                "expression": "B",
+                "conditions": [
+                  {
+                    "evaluator": {
+                      "type": "gt",
+                      "params": [
+                        0
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          ]
         }
       ]
     }
