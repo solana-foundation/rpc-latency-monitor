@@ -118,7 +118,21 @@ async fn flush(
     buffer: &mut Vec<Sample>,
     metrics: &Metrics,
 ) {
-    let rows = std::mem::take(buffer);
+    while !buffer.is_empty() {
+        if !flush_chunk(client, url, token, buffer, metrics).await {
+            return;
+        }
+    }
+}
+
+async fn flush_chunk(
+    client: &reqwest::Client,
+    url: &str,
+    token: &str,
+    buffer: &mut Vec<Sample>,
+    metrics: &Metrics,
+) -> bool {
+    let rows: Vec<Sample> = buffer.drain(..buffer.len().min(FLUSH_ROWS)).collect();
     let count = rows.len();
     let response = client
         .post(url)
@@ -129,7 +143,7 @@ async fn flush(
     let failure = match response {
         Ok(r) if r.status().is_success() => {
             metrics.record_sample_flush("ok", 1);
-            return;
+            return true;
         }
         Ok(r) => {
             metrics.record_sample_flush("rejected", 1);
@@ -147,4 +161,5 @@ async fn flush(
         metrics.record_sample_flush("dropped", 1);
         tracing::warn!(%failure, count, "sample flush failed, buffer full, dropping batch");
     }
+    false
 }
