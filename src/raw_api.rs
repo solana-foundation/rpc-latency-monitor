@@ -6,7 +6,7 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
-use axum::routing::get;
+use axum::routing::{get, post};
 use axum::{Json, Router};
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
@@ -30,6 +30,22 @@ const TEMPLATES: &[&str] = &[
     "requests",
     "win_rate",
     "claim_checks",
+    "samples",
+];
+const DEFAULT_SAMPLE_LIMIT: u64 = 1000;
+const MAX_SAMPLE_LIMIT: u64 = 10000;
+const MAX_INGEST_ROWS: usize = 1000;
+const SAMPLE_FIELDS: &[&str] = &[
+    "ts",
+    "provider",
+    "method",
+    "infra",
+    "region",
+    "target",
+    "status",
+    "error_kind",
+    "latency_ms",
+    "slot",
 ];
 
 pub struct RawApiConfig {
@@ -38,6 +54,7 @@ pub struct RawApiConfig {
     pub grafana_url: String,
     pub grafana_token: String,
     pub datasource_uid: String,
+    pub database_url: String,
 }
 
 impl RawApiConfig {
@@ -55,6 +72,7 @@ impl RawApiConfig {
                 .or_else(|_| need("GRAFANA_API_TOKEN"))?,
             datasource_uid: std::env::var("GRAFANA_DATASOURCE_UID")
                 .unwrap_or_else(|_| "grafanacloud-prom".to_string()),
+            database_url: need("SAMPLES_DATABASE_URL")?,
         })
     }
 }
@@ -79,8 +97,10 @@ pub async fn serve(config: RawApiConfig) -> anyhow::Result<()> {
         windows: Mutex::new(HashMap::new()),
         upstream: tokio::sync::Semaphore::new(MAX_UPSTREAM_CONCURRENCY),
     });
+    tokio::spawn(schema_then_retention(state.clone()));
     let app = Router::new()
         .route("/raw/{template}", get(raw_handler))
+        .route("/ingest/samples", post(ingest_handler))
         .route("/health", get(|| async { "ok" }))
         .with_state(state);
     let listener = tokio::net::TcpListener::bind(bind).await?;
@@ -136,6 +156,37 @@ async fn raw_handler(
         )
             .into_response();
     };
+
+    if query.template == "samples" {
+        let rows = match query_samples(&state, &query).await {
+            Ok(rows) => rows,
+            Err(error) => {
+                tracing::error!(%error, "samples query failed");
+                return error_response(StatusCode::BAD_GATEWAY, "upstream query failed");
+            }
+        };
+        if query.format == "csv" {
+            return (
+                StatusCode::OK,
+                [
+                    ("Content-Type", "text/csv; charset=utf-8".to_string()),
+                    ("Cache-Control", "no-store".to_string()),
+                ],
+                rows_to_csv(&rows),
+            )
+                .into_response();
+        }
+        return (
+            StatusCode::OK,
+            [("Cache-Control", "no-store")],
+            Json(json!({
+                "generatedAt": humantime::format_rfc3339_seconds(SystemTime::now()).to_string(),
+                "template": query.template,
+                "rows": rows,
+            })),
+        )
+            .into_response();
+    }
 
     let series = match run_query(&state, &query).await {
         Ok(series) => series,
@@ -241,12 +292,14 @@ pub struct RawQuery {
     pub method: Option<String>,
     pub infra: Option<String>,
     pub region: Option<String>,
+    pub status: Option<String>,
     pub start: u64,
     pub end: u64,
     pub step: u64,
     pub quantiles: Vec<String>,
     pub by: String,
     pub format: String,
+    pub limit: u64,
 }
 
 pub fn parse_query(template: &str, params: &HashMap<String, String>) -> Result<RawQuery, String> {
@@ -268,6 +321,7 @@ pub fn parse_query(template: &str, params: &HashMap<String, String>) -> Result<R
     let method = label("method")?;
     let infra = label("infra")?;
     let region = label("region")?;
+    let status = label("status")?;
 
     if region.is_some() && infra.is_none() {
         return Err("region requires infra".to_string());
@@ -354,19 +408,257 @@ pub fn parse_query(template: &str, params: &HashMap<String, String>) -> Result<R
         return Err(format!("invalid format \"{format}\"; use json or csv"));
     }
 
+    let limit = match params.get("limit") {
+        None => DEFAULT_SAMPLE_LIMIT,
+        Some(v) => {
+            let limit: u64 = v.parse().map_err(|_| format!("invalid limit \"{v}\""))?;
+            if limit == 0 || limit > MAX_SAMPLE_LIMIT {
+                return Err(format!("limit must be between 1 and {MAX_SAMPLE_LIMIT}"));
+            }
+            limit
+        }
+    };
+
     Ok(RawQuery {
         template: template.to_string(),
         provider,
         method,
         infra,
         region,
+        status,
         start,
         end,
         step,
         quantiles,
         by,
         format,
+        limit,
     })
+}
+
+#[derive(Deserialize, serde::Serialize)]
+struct IngestRow {
+    ts: f64,
+    provider: String,
+    method: String,
+    infra: String,
+    region: String,
+    #[serde(default)]
+    target: String,
+    status: String,
+    error_kind: String,
+    latency_ms: f64,
+    #[serde(default)]
+    slot: Option<u64>,
+}
+
+#[derive(Deserialize)]
+struct IngestBody {
+    rows: Vec<IngestRow>,
+}
+
+async fn ingest_handler(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(body): Json<IngestBody>,
+) -> Response {
+    let token = headers
+        .get("authorization")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .map(str::trim);
+    match token.and_then(|t| verify_token(t, &state.config.jwt_secret)) {
+        Some(sub) if sub == "fleet" => {}
+        Some(_) => return error_response(StatusCode::FORBIDDEN, "ingest requires the fleet token"),
+        None => {
+            return error_response(
+                StatusCode::UNAUTHORIZED,
+                "invalid, expired, or missing token",
+            )
+        }
+    }
+    if body.rows.is_empty() || body.rows.len() > MAX_INGEST_ROWS {
+        return error_response(
+            StatusCode::BAD_REQUEST,
+            &format!("rows must contain 1..={MAX_INGEST_ROWS} entries"),
+        );
+    }
+    for row in &body.rows {
+        let labels = [
+            &row.provider,
+            &row.method,
+            &row.infra,
+            &row.region,
+            &row.status,
+            &row.error_kind,
+        ];
+        if labels.iter().any(|v| !is_valid_label_value(v))
+            || !(row.target.is_empty() || is_valid_label_value(&row.target))
+            || !row.ts.is_finite()
+            || !row.latency_ms.is_finite()
+        {
+            return error_response(StatusCode::BAD_REQUEST, "invalid row values");
+        }
+    }
+    match insert_samples(&state, &body.rows).await {
+        Ok(()) => (StatusCode::OK, Json(json!({"ok": true}))).into_response(),
+        Err(error) => {
+            tracing::error!(%error, "sample ingest failed");
+            error_response(StatusCode::BAD_GATEWAY, "storage insert failed")
+        }
+    }
+}
+
+async fn pg_connect(state: &AppState) -> anyhow::Result<tokio_postgres::Client> {
+    let (client, connection) =
+        tokio_postgres::connect(&state.config.database_url, tokio_postgres::NoTls).await?;
+    tokio::spawn(async move {
+        let _ = connection.await;
+    });
+    Ok(client)
+}
+
+async fn ensure_schema(state: &Arc<AppState>) -> anyhow::Result<()> {
+    let client = pg_connect(state).await?;
+    client
+        .batch_execute(include_str!("../deploy/migrations/0001_probe_samples.sql"))
+        .await?;
+    Ok(())
+}
+
+async fn schema_then_retention(state: Arc<AppState>) {
+    loop {
+        match ensure_schema(&state).await {
+            Ok(()) => break,
+            Err(error) => {
+                tracing::warn!(%error, "schema apply failed, retrying in 30s");
+                tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+            }
+        }
+    }
+    retention_loop(state).await;
+}
+
+async fn retention_loop(state: Arc<AppState>) {
+    let mut tick = tokio::time::interval(std::time::Duration::from_secs(24 * 60 * 60));
+    loop {
+        tick.tick().await;
+        match pg_connect(&state).await {
+            Ok(client) => {
+                if let Err(error) = client
+                    .execute(
+                        "DELETE FROM probe_samples WHERE ts < now() - interval '400 days'",
+                        &[],
+                    )
+                    .await
+                {
+                    tracing::warn!(%error, "sample retention delete failed");
+                }
+            }
+            Err(error) => tracing::warn!(%error, "sample retention connect failed"),
+        }
+    }
+}
+
+async fn insert_samples(state: &AppState, rows: &[IngestRow]) -> anyhow::Result<()> {
+    let client = pg_connect(state).await?;
+    let ts: Vec<f64> = rows.iter().map(|r| r.ts).collect();
+    let provider: Vec<&str> = rows.iter().map(|r| r.provider.as_str()).collect();
+    let method: Vec<&str> = rows.iter().map(|r| r.method.as_str()).collect();
+    let infra: Vec<&str> = rows.iter().map(|r| r.infra.as_str()).collect();
+    let region: Vec<&str> = rows.iter().map(|r| r.region.as_str()).collect();
+    let target: Vec<&str> = rows.iter().map(|r| r.target.as_str()).collect();
+    let status: Vec<&str> = rows.iter().map(|r| r.status.as_str()).collect();
+    let error_kind: Vec<&str> = rows.iter().map(|r| r.error_kind.as_str()).collect();
+    let latency_ms: Vec<f64> = rows.iter().map(|r| r.latency_ms).collect();
+    let slot: Vec<Option<i64>> = rows.iter().map(|r| r.slot.map(|v| v as i64)).collect();
+    client
+        .execute(
+            "INSERT INTO probe_samples (ts, provider, method, infra, region, target, status, error_kind, latency_ms, slot) \
+             SELECT to_timestamp(t), p, m, i, r, tg, st, e, l, sl \
+             FROM UNNEST($1::float8[], $2::text[], $3::text[], $4::text[], $5::text[], $6::text[], $7::text[], $8::text[], $9::float8[], $10::int8[]) \
+             AS x(t, p, m, i, r, tg, st, e, l, sl)",
+            &[
+                &ts,
+                &provider,
+                &method,
+                &infra,
+                &region,
+                &target,
+                &status,
+                &error_kind,
+                &latency_ms,
+                &slot,
+            ],
+        )
+        .await?;
+    Ok(())
+}
+
+async fn query_samples(state: &AppState, query: &RawQuery) -> anyhow::Result<Vec<Value>> {
+    let client = pg_connect(state).await?;
+    let mut sql = String::from(
+        "SELECT extract(epoch from ts)::float8 AS ts, provider, method, infra, region, target, status, error_kind, latency_ms, slot \
+         FROM probe_samples WHERE ts >= to_timestamp($1) AND ts < to_timestamp($2)",
+    );
+    let start = query.start as f64;
+    let end = query.end as f64;
+    let mut params: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> = vec![&start, &end];
+    let filters = [
+        ("provider", &query.provider),
+        ("method", &query.method),
+        ("infra", &query.infra),
+        ("region", &query.region),
+        ("status", &query.status),
+    ];
+    for (name, value) in &filters {
+        if let Some(value) = value {
+            params.push(value);
+            sql.push_str(&format!(" AND {name} = ${}", params.len()));
+        }
+    }
+    sql.push_str(&format!(" ORDER BY ts DESC LIMIT {}", query.limit));
+    let rows = client.query(&sql, &params).await?;
+    Ok(rows
+        .iter()
+        .map(|row| {
+            json!({
+                "ts": row.get::<_, f64>("ts"),
+                "provider": row.get::<_, &str>("provider"),
+                "method": row.get::<_, &str>("method"),
+                "infra": row.get::<_, &str>("infra"),
+                "region": row.get::<_, &str>("region"),
+                "target": row.get::<_, &str>("target"),
+                "status": row.get::<_, &str>("status"),
+                "error_kind": row.get::<_, &str>("error_kind"),
+                "latency_ms": row.get::<_, f64>("latency_ms"),
+                "slot": row.get::<_, Option<i64>>("slot"),
+            })
+        })
+        .collect())
+}
+
+fn rows_to_csv(rows: &[Value]) -> String {
+    let mut out = vec![SAMPLE_FIELDS.join(",")];
+    for row in rows {
+        out.push(
+            SAMPLE_FIELDS
+                .iter()
+                .map(|field| {
+                    let value = &row[*field];
+                    if value.is_null() {
+                        String::new()
+                    } else if let Some(s) = value.as_str() {
+                        escape_csv(s)
+                    } else {
+                        value.to_string()
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join(","),
+        );
+    }
+    out.join("\n")
 }
 
 fn is_valid_label_value(value: &str) -> bool {
