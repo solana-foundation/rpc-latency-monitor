@@ -692,7 +692,8 @@
           "annotations": {
             "summary": "Fleet sample flushes are failing - probe samples are not reaching storage",
             "description": "More than 10 sample-log batch flushes across the fleet failed, were rejected, or were dropped in the last 30 minutes, sustained 15 minutes. The fleet buffers about 2 hours per box, then drops. This is the end-to-end health signal for the raw-api ingest path: it fires when the Cloud Run service is down, Cloud SQL is unavailable, the fleet token expired, or egress is broken. Aggregate metrics in Prometheus are unaffected.",
-            "runbook": "Check the raw-api service first: curl /health on rpc-raw-api (Cloud Run, us-east4). 502s on ingest = Cloud SQL down or SAMPLES_DATABASE_URL broken (Cloud Run logs show the pg error). 401/403 = SAMPLE_LOG_TOKEN expired or RAW_API_JWT_SECRET rotated without re-minting the fleet token. Breakdown: rpc_sample_flush_total by result and region."
+            "runbook": "Check the raw-api service first: curl /health on rpc-raw-api (Cloud Run, us-east4). 502s on ingest = Cloud SQL down or SAMPLES_DATABASE_URL broken (Cloud Run logs show the pg error). 401/403 = SAMPLE_LOG_TOKEN expired or RAW_API_JWT_SECRET rotated without re-minting the fleet token. Breakdown: rpc_sample_flush_total by result and region.",
+            "runbook_url": "https://www.notion.so/3c7d36dad52d818bbc97fbc0f44768ea"
           },
           "data": [
             {
