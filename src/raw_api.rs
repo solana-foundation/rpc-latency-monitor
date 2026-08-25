@@ -34,7 +34,7 @@ const TEMPLATES: &[&str] = &[
 ];
 const DEFAULT_SAMPLE_LIMIT: u64 = 1000;
 const MAX_SAMPLE_LIMIT: u64 = 10000;
-const MAX_INGEST_ROWS: usize = 1000;
+const MAX_INGEST_ROWS: usize = 10000;
 const SAMPLE_FIELDS: &[&str] = &[
     "ts",
     "provider",
