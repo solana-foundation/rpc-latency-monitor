@@ -9,7 +9,7 @@ use crate::rpc::{CallResult, CallStatus};
 const BUFFER: usize = 4096;
 const FLUSH_ROWS: usize = 500;
 const FLUSH_SECONDS: u64 = 30;
-const MAX_BUFFERED: usize = 2000;
+const MAX_BUFFERED: usize = 10000;
 
 #[derive(Clone)]
 pub struct SampleLogger {
