@@ -3,7 +3,7 @@ use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
-use axum::extract::{Path, Query, State};
+use axum::extract::{DefaultBodyLimit, Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
@@ -35,6 +35,7 @@ const TEMPLATES: &[&str] = &[
 const DEFAULT_SAMPLE_LIMIT: u64 = 1000;
 const MAX_SAMPLE_LIMIT: u64 = 10000;
 const MAX_INGEST_ROWS: usize = 10000;
+const MAX_INGEST_BODY_BYTES: usize = 8 * 1024 * 1024;
 const SAMPLE_FIELDS: &[&str] = &[
     "ts",
     "provider",
@@ -100,7 +101,10 @@ pub async fn serve(config: RawApiConfig) -> anyhow::Result<()> {
     tokio::spawn(schema_then_retention(state.clone()));
     let app = Router::new()
         .route("/raw/{template}", get(raw_handler))
-        .route("/ingest/samples", post(ingest_handler))
+        .route(
+            "/ingest/samples",
+            post(ingest_handler).layer(DefaultBodyLimit::max(MAX_INGEST_BODY_BYTES)),
+        )
         .route("/health", get(|| async { "ok" }))
         .with_state(state);
     let listener = tokio::net::TcpListener::bind(bind).await?;
