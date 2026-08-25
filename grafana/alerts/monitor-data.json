@@ -743,9 +743,9 @@
                 "conditions": [
                   {
                     "evaluator": {
-                      "type": "lt",
+                      "type": "gt",
                       "params": [
-                        1
+                        0
                       ]
                     }
                   }
