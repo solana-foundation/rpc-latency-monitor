@@ -9,6 +9,7 @@ User={{ run_user }}
 Group={{ run_user }}
 EnvironmentFile={{ env_file }}
 Environment=MONITOR_REGION={{ monitor_region }}
+Environment=MONITOR_INFRA={{ monitor_infra }}
 Environment=RUST_LOG=info
 ExecStart={{ monitor_bin }} --config {{ conf_dir }}/config.yaml
 Restart=always
