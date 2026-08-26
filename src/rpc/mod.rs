@@ -8,6 +8,9 @@ use std::time::{Duration, Instant};
 use reqwest::header::{HeaderMap, HeaderValue, CACHE_CONTROL, PRAGMA};
 use reqwest::StatusCode;
 use serde_json::Value;
+use tokio::sync::Semaphore;
+
+static LARGE_PARSE_GATE: Semaphore = Semaphore::const_new(2);
 
 use crate::config::GpaTarget;
 use crate::rpc::methods::RpcMethod;
@@ -227,7 +230,8 @@ impl RpcClient {
         let Ok(bytes) = response.bytes().await else {
             return RawResponse::Unavailable;
         };
-        let json: Value = if bytes.len() >= LARGE_BODY_BYTES {
+        let mut json: Value = if bytes.len() >= LARGE_BODY_BYTES {
+            let _permit = LARGE_PARSE_GATE.acquire().await;
             match tokio::task::spawn_blocking(move || serde_json::from_slice(&bytes)).await {
                 Ok(Ok(json)) => json,
                 _ => return RawResponse::Unavailable,
@@ -242,8 +246,8 @@ impl RpcClient {
             let code = error.get("code").and_then(Value::as_i64).unwrap_or(0);
             return RawResponse::RpcError(code);
         }
-        match json.get("result") {
-            Some(value) => RawResponse::Result(value.clone()),
+        match json.get_mut("result") {
+            Some(value) => RawResponse::Result(value.take()),
             None => RawResponse::Unavailable,
         }
     }
@@ -291,6 +295,7 @@ impl RpcClient {
         let parsed = match body {
             Ok(bytes) if bytes.len() >= LARGE_BODY_BYTES => {
                 let ctx = ctx.clone();
+                let _permit = LARGE_PARSE_GATE.acquire().await;
                 match tokio::task::spawn_blocking(move || {
                     classify(http_status, &bytes, method, &ctx)
                 })
@@ -399,6 +404,33 @@ mod tests {
 
     fn body(s: &str) -> Vec<u8> {
         s.as_bytes().to_vec()
+    }
+
+    #[tokio::test]
+    async fn large_parse_gate_bounds_concurrency() {
+        use std::sync::atomic::AtomicUsize;
+        let in_flight = std::sync::Arc::new(AtomicUsize::new(0));
+        let peak = std::sync::Arc::new(AtomicUsize::new(0));
+        let mut handles = Vec::new();
+        for _ in 0..8 {
+            let in_flight = in_flight.clone();
+            let peak = peak.clone();
+            handles.push(tokio::spawn(async move {
+                let _permit = LARGE_PARSE_GATE.acquire().await;
+                let now = in_flight.fetch_add(1, Ordering::SeqCst) + 1;
+                peak.fetch_max(now, Ordering::SeqCst);
+                tokio::task::spawn_blocking(|| {
+                    std::thread::sleep(Duration::from_millis(20));
+                })
+                .await
+                .unwrap();
+                in_flight.fetch_sub(1, Ordering::SeqCst);
+            }));
+        }
+        for handle in handles {
+            handle.await.unwrap();
+        }
+        assert!(peak.load(Ordering::SeqCst) <= 2);
     }
 
     #[test]
