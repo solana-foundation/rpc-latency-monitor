@@ -1,6 +1,15 @@
 #!/bin/bash
 set -euo pipefail
 
+retry() {
+  local n=0
+  until "$@"; do
+    n=$((n + 1))
+    [ "$n" -ge 5 ] && return 1
+    sleep $((n * 10))
+  done
+}
+
 export DOCKER_CONFIG=/tmp/docker
 mkdir -p "$DOCKER_CONFIG"
 
@@ -18,10 +27,15 @@ export CONF_DIR=/var/lib/rpc-latency-monitor
 docker rm -f rpc-monitor alloy >/dev/null 2>&1 || true
 
 REGISTRY_HOST="${IMAGE%%/*}"
-ACCESS_TOKEN="$(curl -s -H "Metadata-Flavor: Google" \
-  "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token" \
-  | sed -n 's/.*"access_token":"\([^"]*\)".*/\1/p')"
-echo "$ACCESS_TOKEN" | docker login -u oauth2accesstoken --password-stdin "https://${REGISTRY_HOST}"
+docker_login() {
+  local access_token
+  access_token="$(curl -fsS -H "Metadata-Flavor: Google" \
+    "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token" \
+    | sed -n 's/.*"access_token":"\([^"]*\)".*/\1/p')"
+  [ -n "$access_token" ] || return 1
+  echo "$access_token" | docker login -u oauth2accesstoken --password-stdin "https://${REGISTRY_HOST}"
+}
+retry docker_login
 
 rm -rf "$CONF_DIR"
 mkdir -p "$CONF_DIR"

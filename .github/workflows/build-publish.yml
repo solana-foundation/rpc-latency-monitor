@@ -7,8 +7,7 @@ on:
       - 'src/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
-      - 'deploy/Dockerfile'
-      - 'deploy/cloudbuild.yaml'
+      - 'deploy/**'
       - 'grafana/**'
       - '.github/workflows/build-publish.yml'
   workflow_dispatch:
