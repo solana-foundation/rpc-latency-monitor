@@ -8,6 +8,7 @@ use crate::rpc::{RequestContext, RpcClient};
 #[derive(Debug, Clone, Default)]
 pub struct ReferenceSlot {
     tip: Arc<AtomicU64>,
+    endpoint_tip: Arc<AtomicU64>,
 }
 
 impl ReferenceSlot {
@@ -19,8 +20,21 @@ impl ReferenceSlot {
         self.tip.fetch_max(slot, Ordering::Relaxed);
     }
 
+    pub fn observe_endpoint(&self, slot: u64) {
+        // Start a fresh provider-observation window whenever the trusted source
+        // is observed. This preserves max-observed fallback between successful
+        // polls without allowing a value from an older window to poison the tip
+        // permanently.
+        self.endpoint_tip.store(slot, Ordering::SeqCst);
+        self.tip.store(0, Ordering::SeqCst);
+    }
+
     pub fn current(&self) -> Option<u64> {
-        match self.tip.load(Ordering::Relaxed) {
+        let tip = self
+            .tip
+            .load(Ordering::SeqCst)
+            .max(self.endpoint_tip.load(Ordering::SeqCst));
+        match tip {
             0 => None,
             slot => Some(slot),
         }
@@ -64,7 +78,7 @@ pub async fn poll_reference_endpoint(
             continue;
         };
         if let Some(slot) = result.observed_slot {
-            reference.observe(slot);
+            reference.observe_endpoint(slot);
         }
     }
 }
@@ -96,5 +110,43 @@ mod tests {
         let reference = ReferenceSlot::new();
         assert_eq!(reference.current(), None);
         assert_eq!(reference.lag_for(50), None);
+    }
+
+    #[test]
+    fn provider_observation_cannot_permanently_poison_endpoint_reference() {
+        let reference = ReferenceSlot::new();
+
+        // The endpoint poll establishes the trusted chain tip.
+        reference.observe_endpoint(100);
+
+        // The scheduler currently feeds a successful provider observation through
+        // the same irreversible fetch_max path before claim verification settles.
+        reference.observe(1_000_000);
+
+        // A later endpoint poll starts a fresh observation window.
+        reference.observe_endpoint(101);
+
+        assert_eq!(reference.current(), Some(101));
+        assert_eq!(reference.lag_for(101), Some(0));
+    }
+
+    #[test]
+    fn provider_max_is_retained_between_endpoint_polls() {
+        let reference = ReferenceSlot::new();
+        reference.observe_endpoint(100);
+        reference.observe(103);
+        reference.observe(102);
+
+        assert_eq!(reference.current(), Some(103));
+    }
+
+    #[test]
+    fn provider_only_mode_keeps_max_observed_fallback() {
+        let reference = ReferenceSlot::new();
+        reference.observe(100);
+        reference.observe(103);
+        reference.observe(102);
+
+        assert_eq!(reference.current(), Some(103));
     }
 }
