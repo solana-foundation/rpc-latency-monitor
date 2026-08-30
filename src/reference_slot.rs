@@ -1,5 +1,4 @@
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use crate::rpc::methods::RpcMethod;
@@ -7,8 +6,13 @@ use crate::rpc::{RequestContext, RpcClient};
 
 #[derive(Debug, Clone, Default)]
 pub struct ReferenceSlot {
-    tip: Arc<AtomicU64>,
-    endpoint_tip: Arc<AtomicU64>,
+    inner: Arc<Mutex<ReferenceState>>,
+}
+
+#[derive(Debug, Default)]
+struct ReferenceState {
+    endpoint_tip: u64,
+    provider_tip: u64,
 }
 
 impl ReferenceSlot {
@@ -17,7 +21,9 @@ impl ReferenceSlot {
     }
 
     pub fn observe(&self, slot: u64) {
-        self.tip.fetch_max(slot, Ordering::Relaxed);
+        if let Ok(mut state) = self.inner.lock() {
+            state.provider_tip = state.provider_tip.max(slot);
+        }
     }
 
     pub fn observe_endpoint(&self, slot: u64) {
@@ -25,15 +31,19 @@ impl ReferenceSlot {
         // is observed. This preserves max-observed fallback between successful
         // polls without allowing a value from an older window to poison the tip
         // permanently.
-        self.endpoint_tip.store(slot, Ordering::SeqCst);
-        self.tip.store(0, Ordering::SeqCst);
+        if let Ok(mut state) = self.inner.lock() {
+            // A delayed response from an older poll must not regress the trusted
+            // tip or clear observations collected after a newer response.
+            if slot > state.endpoint_tip {
+                state.endpoint_tip = slot;
+                state.provider_tip = 0;
+            }
+        }
     }
 
     pub fn current(&self) -> Option<u64> {
-        let tip = self
-            .tip
-            .load(Ordering::SeqCst)
-            .max(self.endpoint_tip.load(Ordering::SeqCst));
+        let state = self.inner.lock().ok()?;
+        let tip = state.provider_tip.max(state.endpoint_tip);
         match tip {
             0 => None,
             slot => Some(slot),
@@ -146,6 +156,17 @@ mod tests {
         reference.observe(100);
         reference.observe(103);
         reference.observe(102);
+
+        assert_eq!(reference.current(), Some(103));
+    }
+
+    #[test]
+    fn lagging_endpoint_response_cannot_regress_or_clear_provider_tip() {
+        let reference = ReferenceSlot::new();
+        reference.observe_endpoint(101);
+        reference.observe(103);
+
+        reference.observe_endpoint(100);
 
         assert_eq!(reference.current(), Some(103));
     }
