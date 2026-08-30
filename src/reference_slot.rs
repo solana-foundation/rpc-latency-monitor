@@ -34,7 +34,7 @@ impl ReferenceSlot {
         if let Ok(mut state) = self.inner.lock() {
             // A delayed response from an older poll must not regress the trusted
             // tip or clear observations collected after a newer response.
-            if slot > state.endpoint_tip {
+            if slot >= state.endpoint_tip {
                 state.endpoint_tip = slot;
                 state.provider_tip = 0;
             }
@@ -169,5 +169,17 @@ mod tests {
         reference.observe_endpoint(100);
 
         assert_eq!(reference.current(), Some(103));
+    }
+
+    #[test]
+    fn equal_endpoint_poll_starts_a_fresh_provider_window() {
+        let reference = ReferenceSlot::new();
+        reference.observe_endpoint(100);
+        reference.observe(1_000_000);
+
+        reference.observe_endpoint(100);
+
+        assert_eq!(reference.current(), Some(100));
+        assert_eq!(reference.lag_for(100), Some(0));
     }
 }
