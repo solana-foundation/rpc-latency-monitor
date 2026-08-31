@@ -10,6 +10,14 @@ retry() {
   done
 }
 
+mkdir -p /etc/systemd/resolved.conf.d
+cat >/etc/systemd/resolved.conf.d/99-rpc-monitor-dns.conf <<'EOF'
+[Resolve]
+DNS=8.8.8.8 8.8.4.4
+Domains=~.
+EOF
+systemctl restart systemd-resolved
+
 retry dnf install -y docker
 systemctl enable --now docker
 
