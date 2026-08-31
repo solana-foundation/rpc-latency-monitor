@@ -59,6 +59,27 @@
   become: true
   changed_when: true
 
+- name: Create systemd-resolved drop-in dir
+  ansible.builtin.file:
+    path: /etc/systemd/resolved.conf.d
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  become: true
+
+- name: Use ECS-forwarding resolvers
+  ansible.builtin.template:
+    src: 99-rpc-monitor-dns.conf.j2
+    dest: /etc/systemd/resolved.conf.d/99-rpc-monitor-dns.conf
+    owner: root
+    group: root
+    mode: "0644"
+  become: true
+  notify:
+    - restart systemd-resolved
+    - restart rpc-monitor
+
 - name: Install build dependencies
   ansible.builtin.apt:
     name: "{{ apt_build_deps }}"

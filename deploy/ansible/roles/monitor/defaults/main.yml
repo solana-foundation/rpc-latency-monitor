@@ -9,6 +9,10 @@ alloy_bin: "/usr/local/bin/alloy"
 doppler_version: "3.76.1"
 doppler_sha256: "e35230bd21fdbd7e41ddcb24672ec61cecefdb22de244d0216ea6b59853f63f2"
 
+dns_servers:
+  - 8.8.8.8
+  - 8.8.4.4
+
 conf_dir: "/etc/rpc-latency-monitor"
 data_dir: "/var/lib/rpc-latency-monitor"
 env_file: "/etc/rpc-latency-monitor/env"
