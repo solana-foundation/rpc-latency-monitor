@@ -29,6 +29,14 @@ push_alerts() {
   code="${body##*$'\n'}"; body="${body%$'\n'*}"
   [ "$code" -ge 200 ] && [ "$code" -lt 300 ] || { echo "alert upsert failed (HTTP $code): $body" >&2; exit 1; }
   echo "pushed alert group $group"
+
+  body="$(curl -sS -w '\n%{http_code}' -X PUT \
+    "$GRAFANA_API_URL/api/v1/provisioning/policies" \
+    -H "Authorization: Bearer $GRAFANA_API_TOKEN" -H "Content-Type: application/json" \
+    -H "X-Disable-Provenance: true" -d @"$REPO_ROOT/grafana/alerts/notification-policies.json")"
+  code="${body##*$'\n'}"; body="${body%$'\n'*}"
+  [ "$code" -ge 200 ] && [ "$code" -lt 300 ] || { echo "policy upsert failed (HTTP $code): $body" >&2; exit 1; }
+  echo "pushed notification policies"
 }
 
 deploy_fleet() {
