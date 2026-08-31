@@ -1,3 +1,4 @@
+use std::net::IpAddr;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
@@ -31,6 +32,7 @@ struct Sample {
     error_kind: &'static str,
     latency_ms: f64,
     slot: Option<u64>,
+    endpoint_ip: Option<IpAddr>,
 }
 
 impl SampleLogger {
@@ -75,6 +77,7 @@ impl SampleLogger {
             error_kind: status.error_kind().unwrap_or("none"),
             latency_ms: result.latency.as_secs_f64() * 1000.0,
             slot: result.observed_slot,
+            endpoint_ip: result.endpoint_ip,
         });
     }
 }

@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::sync::{Arc, Mutex};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
@@ -47,6 +47,7 @@ const SAMPLE_FIELDS: &[&str] = &[
     "error_kind",
     "latency_ms",
     "slot",
+    "endpoint_ip",
 ];
 
 pub struct RawApiConfig {
@@ -454,6 +455,8 @@ struct IngestRow {
     latency_ms: f64,
     #[serde(default)]
     slot: Option<u64>,
+    #[serde(default)]
+    endpoint_ip: Option<IpAddr>,
 }
 
 #[derive(Deserialize)]
@@ -524,9 +527,12 @@ async fn pg_connect(state: &AppState) -> anyhow::Result<tokio_postgres::Client> 
 
 async fn ensure_schema(state: &Arc<AppState>) -> anyhow::Result<()> {
     let client = pg_connect(state).await?;
-    client
-        .batch_execute(include_str!("../deploy/migrations/0001_probe_samples.sql"))
-        .await?;
+    for migration in [
+        include_str!("../deploy/migrations/0001_probe_samples.sql"),
+        include_str!("../deploy/migrations/0002_probe_samples_endpoint_ip.sql"),
+    ] {
+        client.batch_execute(migration).await?;
+    }
     Ok(())
 }
 
@@ -576,12 +582,13 @@ async fn insert_samples(state: &AppState, rows: &[IngestRow]) -> anyhow::Result<
     let error_kind: Vec<&str> = rows.iter().map(|r| r.error_kind.as_str()).collect();
     let latency_ms: Vec<f64> = rows.iter().map(|r| r.latency_ms).collect();
     let slot: Vec<Option<i64>> = rows.iter().map(|r| r.slot.map(|v| v as i64)).collect();
+    let endpoint_ip: Vec<Option<IpAddr>> = rows.iter().map(|r| r.endpoint_ip).collect();
     client
         .execute(
-            "INSERT INTO probe_samples (ts, provider, method, infra, region, target, status, error_kind, latency_ms, slot) \
-             SELECT to_timestamp(t), p, m, i, r, tg, st, e, l, sl \
-             FROM UNNEST($1::float8[], $2::text[], $3::text[], $4::text[], $5::text[], $6::text[], $7::text[], $8::text[], $9::float8[], $10::int8[]) \
-             AS x(t, p, m, i, r, tg, st, e, l, sl)",
+            "INSERT INTO probe_samples (ts, provider, method, infra, region, target, status, error_kind, latency_ms, slot, endpoint_ip) \
+             SELECT to_timestamp(t), p, m, i, r, tg, st, e, l, sl, ip \
+             FROM UNNEST($1::float8[], $2::text[], $3::text[], $4::text[], $5::text[], $6::text[], $7::text[], $8::text[], $9::float8[], $10::int8[], $11::inet[]) \
+             AS x(t, p, m, i, r, tg, st, e, l, sl, ip)",
             &[
                 &ts,
                 &provider,
@@ -593,6 +600,7 @@ async fn insert_samples(state: &AppState, rows: &[IngestRow]) -> anyhow::Result<
                 &error_kind,
                 &latency_ms,
                 &slot,
+                &endpoint_ip,
             ],
         )
         .await?;
@@ -602,7 +610,7 @@ async fn insert_samples(state: &AppState, rows: &[IngestRow]) -> anyhow::Result<
 async fn query_samples(state: &AppState, query: &RawQuery) -> anyhow::Result<Vec<Value>> {
     let client = pg_connect(state).await?;
     let mut sql = String::from(
-        "SELECT extract(epoch from ts)::float8 AS ts, provider, method, infra, region, target, status, error_kind, latency_ms, slot \
+        "SELECT extract(epoch from ts)::float8 AS ts, provider, method, infra, region, target, status, error_kind, latency_ms, slot, endpoint_ip \
          FROM probe_samples WHERE ts >= to_timestamp($1) AND ts < to_timestamp($2)",
     );
     let start = query.start as f64;
@@ -637,6 +645,7 @@ async fn query_samples(state: &AppState, query: &RawQuery) -> anyhow::Result<Vec
                 "error_kind": row.get::<_, &str>("error_kind"),
                 "latency_ms": row.get::<_, f64>("latency_ms"),
                 "slot": row.get::<_, Option<i64>>("slot"),
+                "endpoint_ip": row.get::<_, Option<IpAddr>>("endpoint_ip"),
             })
         })
         .collect())
@@ -1105,5 +1114,55 @@ mod tests {
             to_csv(&summary),
             "provider,wins,samples,win_pct\nhelius,3,4,75.0"
         );
+    }
+
+    fn ingest_row(extra: Value) -> serde_json::Result<IngestRow> {
+        let mut row = json!({
+            "ts": 1.0, "provider": "helius", "method": "getSlot", "infra": "gcp",
+            "region": "fra2", "status": "success", "error_kind": "none", "latency_ms": 1.5,
+        });
+        row.as_object_mut()
+            .unwrap()
+            .extend(extra.as_object().unwrap().clone());
+        serde_json::from_value(row)
+    }
+
+    #[test]
+    fn ingest_row_endpoint_ip_is_optional_and_validated() {
+        assert_eq!(ingest_row(json!({})).unwrap().endpoint_ip, None);
+        assert_eq!(
+            ingest_row(json!({"endpoint_ip": null}))
+                .unwrap()
+                .endpoint_ip,
+            None
+        );
+        assert_eq!(
+            ingest_row(json!({"endpoint_ip": "203.0.113.7"}))
+                .unwrap()
+                .endpoint_ip,
+            Some("203.0.113.7".parse().unwrap())
+        );
+        assert!(ingest_row(json!({"endpoint_ip": "not-an-ip"})).is_err());
+    }
+
+    #[test]
+    fn sample_csv_renders_endpoint_ip_or_blank() {
+        let rows = vec![
+            json!({
+                "ts": 1.0, "provider": "helius", "method": "getSlot", "infra": "gcp",
+                "region": "fra2", "target": "", "status": "success", "error_kind": "none",
+                "latency_ms": 1.5, "slot": 7, "endpoint_ip": "203.0.113.7",
+            }),
+            json!({
+                "ts": 2.0, "provider": "helius", "method": "getSlot", "infra": "gcp",
+                "region": "fra2", "target": "", "status": "timeout", "error_kind": "timeout",
+                "latency_ms": 10000.0, "slot": null, "endpoint_ip": null,
+            }),
+        ];
+        let csv = rows_to_csv(&rows);
+        let mut lines = csv.lines();
+        assert!(lines.next().unwrap().ends_with(",slot,endpoint_ip"));
+        assert!(lines.next().unwrap().ends_with(",7,203.0.113.7"));
+        assert!(lines.next().unwrap().ends_with(",timeout,10000.0,,"));
     }
 }

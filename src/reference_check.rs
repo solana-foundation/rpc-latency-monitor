@@ -288,6 +288,7 @@ fn archival_result(latency: Duration, status: CallStatus) -> CallResult {
         archival_signature: None,
         accounts: Vec::new(),
         claim: None,
+        endpoint_ip: None,
     }
 }
 
@@ -810,6 +811,7 @@ mod tests {
             archival_signature: None,
             accounts: Vec::new(),
             claim,
+            endpoint_ip: None,
         }
     }
 

@@ -1,6 +1,7 @@
 pub mod methods;
 
 use std::collections::HashMap;
+use std::net::IpAddr;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -34,6 +35,7 @@ pub struct CallResult {
     pub archival_signature: Option<String>,
     pub accounts: Vec<String>,
     pub claim: Option<ClaimPayload>,
+    pub endpoint_ip: Option<IpAddr>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -284,11 +286,13 @@ impl RpcClient {
                     archival_signature: None,
                     accounts: Vec::new(),
                     claim: None,
+                    endpoint_ip: None,
                 });
             }
         };
 
         let http_status = response.status();
+        let endpoint_ip = response.remote_addr().map(|addr| addr.ip());
         let body = response.bytes().await;
         let latency = start.elapsed();
 
@@ -316,6 +320,7 @@ impl RpcClient {
             archival_signature: parsed.archival_signature,
             accounts: parsed.accounts,
             claim: parsed.claim,
+            endpoint_ip,
         })
     }
 }
