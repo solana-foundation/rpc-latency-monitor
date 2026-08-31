@@ -126,13 +126,15 @@ jobs:
 
       - name: Notify Slack — deploy started
         if: env.SLACK_WEBHOOK != '' && github.event_name == 'workflow_dispatch'
+        env:
+          SUMMARY_FIELDS: ${{ steps.summary.outputs.fields }}
         run: |
           PAYLOAD=$(jq -n \
             --arg marker "[STARTED] Deploy RPC Latency Monitor" \
             --arg target "$TARGET" \
             --arg scope "$PROVIDER" \
             --arg color "#36a64f" \
-            --argjson fields '${{ steps.summary.outputs.fields }}' \
+            --argjson fields "$SUMMARY_FIELDS" \
             '{
               text: ("*" + $marker + "* — target: `" + $target + "` provider: `" + $scope + "`"),
               attachments: [{
@@ -163,13 +165,15 @@ jobs:
 
       - name: Notify Slack — deploy succeeded
         if: success() && env.SLACK_WEBHOOK != ''
+        env:
+          SUMMARY_FIELDS: ${{ steps.summary.outputs.fields }}
         run: |
           PAYLOAD=$(jq -n \
             --arg marker "[SUCCESS] Deploy RPC Latency Monitor" \
             --arg target "$TARGET" \
             --arg scope "$PROVIDER" \
             --arg color "#36a64f" \
-            --argjson fields '${{ steps.summary.outputs.fields }}' \
+            --argjson fields "$SUMMARY_FIELDS" \
             '{
               text: ("*" + $marker + "* — target: `" + $target + "` provider: `" + $scope + "`"),
               attachments: [{
@@ -185,13 +189,15 @@ jobs:
 
       - name: Notify Slack — deploy failed
         if: failure() && env.SLACK_WEBHOOK != ''
+        env:
+          SUMMARY_FIELDS: ${{ steps.summary.outputs.fields }}
         run: |
           PAYLOAD=$(jq -n \
             --arg marker "[FAILED] Deploy RPC Latency Monitor" \
             --arg target "$TARGET" \
             --arg scope "$PROVIDER" \
             --arg color "#ff0000" \
-            --argjson fields '${{ steps.summary.outputs.fields }}' \
+            --argjson fields "$SUMMARY_FIELDS" \
             '{
               text: ("*" + $marker + "* — target: `" + $target + "` provider: `" + $scope + "`"),
               attachments: [{
