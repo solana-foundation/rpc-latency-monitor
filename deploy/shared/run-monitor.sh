@@ -10,6 +10,7 @@ retry fetch_env
 chmod 600 "$ENV_FILE"
 
 docker run -d --name rpc-monitor --network host --restart always \
+  --memory 2g --memory-swap 2g \
   -e MONITOR_REGION="$REGION" -e MONITOR_INFRA="$INFRA" -e RUST_LOG=info \
   --env-file "$ENV_FILE" \
   -v "$CONF_DIR":/conf:ro \
