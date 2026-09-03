@@ -110,6 +110,11 @@
     state: directory
     mode: "0755"
 
+- name: Clear previous source, keeping the cargo target cache
+  ansible.builtin.shell: >
+    find {{ monitor_src_dir }} -mindepth 1 -maxdepth 1 ! -name target -exec rm -rf {} +
+  changed_when: true
+
 - name: Unpack monitor source
   ansible.builtin.unarchive:
     src: "/tmp/rpc-latency-monitor-{{ monitor_ref }}.tar.gz"
