@@ -94,15 +94,33 @@
   args:
     creates: "{{ ansible_user_dir }}/.cargo/bin/cargo"
 
-- name: Fetch monitor source at the pinned ref
-  ansible.builtin.git:
-    repo: "{{ monitor_repo }}"
-    dest: "{{ monitor_src_dir }}"
-    version: "{{ monitor_ref }}"
-  register: monitor_src
-  retries: 10
+- name: Download monitor source tarball at the pinned ref
+  ansible.builtin.get_url:
+    url: "{{ monitor_tarball_url }}"
+    dest: "/tmp/rpc-latency-monitor-{{ monitor_ref }}.tar.gz"
+    mode: "0644"
+  register: monitor_tarball
+  retries: 5
   delay: 10
-  until: monitor_src is succeeded
+  until: monitor_tarball is succeeded
+
+- name: Ensure source dir exists
+  ansible.builtin.file:
+    path: "{{ monitor_src_dir }}"
+    state: directory
+    mode: "0755"
+
+- name: Clear previous source, keeping the cargo target cache
+  ansible.builtin.shell: >
+    find {{ monitor_src_dir }} -mindepth 1 -maxdepth 1 ! -name target -exec rm -rf {} +
+  changed_when: true
+
+- name: Unpack monitor source
+  ansible.builtin.unarchive:
+    src: "/tmp/rpc-latency-monitor-{{ monitor_ref }}.tar.gz"
+    dest: "{{ monitor_src_dir }}"
+    remote_src: true
+    extra_opts: ["--strip-components=1"]
 
 - name: Build monitor (release, locked)
   ansible.builtin.shell: |

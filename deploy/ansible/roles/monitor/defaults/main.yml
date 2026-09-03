@@ -1,5 +1,5 @@
 ---
-monitor_repo: "https://github.com/solana-foundation/rpc-latency-monitor.git"
+monitor_tarball_url: "https://codeload.github.com/solana-foundation/rpc-latency-monitor/tar.gz/{{ monitor_ref }}"
 monitor_src_dir: "{{ ansible_user_dir }}/rpc-latency-monitor-src"
 monitor_bin: "/usr/local/bin/rpc-latency-monitor"
 
