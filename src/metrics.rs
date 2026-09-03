@@ -184,6 +184,7 @@ mod tests {
             archival_signature: None,
             accounts: Vec::new(),
             claim: None,
+            endpoint_ip: None,
         }
     }
 
