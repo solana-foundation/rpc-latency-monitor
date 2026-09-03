@@ -4,7 +4,7 @@
   "routes": [
     {
       "receiver": "rpc-latency-slack",
-      "group_by": ["alertname", "provider"],
+      "group_by": ["alertname", "provider", "error_kind"],
       "object_matchers": [["service", "=", "rpc-latency-monitor"]],
       "repeat_interval": "7d"
     }
