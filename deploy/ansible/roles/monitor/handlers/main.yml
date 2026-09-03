@@ -1,3 +1,9 @@
+- name: restart systemd-resolved
+  ansible.builtin.systemd:
+    name: systemd-resolved
+    state: restarted
+  become: true
+
 - name: restart rpc-monitor
   ansible.builtin.systemd:
     name: rpc-monitor
