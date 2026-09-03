@@ -99,6 +99,10 @@
     repo: "{{ monitor_repo }}"
     dest: "{{ monitor_src_dir }}"
     version: "{{ monitor_ref }}"
+  register: monitor_src
+  retries: 10
+  delay: 10
+  until: monitor_src is succeeded
 
 - name: Build monitor (release, locked)
   ansible.builtin.shell: |
