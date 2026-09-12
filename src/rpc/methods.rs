@@ -342,7 +342,7 @@ fn transaction_params(signature: String) -> Value {
     json!([signature, {
         "encoding": "json",
         "commitment": "confirmed",
-        "maxSupportedTransactionVersion": 0,
+        "maxSupportedTransactionVersion": 1,
     }])
 }
 
@@ -352,7 +352,7 @@ fn block_params(slot: u64) -> Value {
         "transactionDetails": "full",
         "rewards": false,
         "commitment": "confirmed",
-        "maxSupportedTransactionVersion": 0,
+        "maxSupportedTransactionVersion": 1,
     }])
 }
 

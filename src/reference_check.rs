@@ -96,7 +96,7 @@ async fn block_hash(client: &RpcClient, url: &str, slot: u64) -> Option<String> 
         "transactionDetails": "none",
         "rewards": false,
         "commitment": "finalized",
-        "maxSupportedTransactionVersion": 0,
+        "maxSupportedTransactionVersion": 1,
     }]);
     client
         .raw_call(url, "getBlock", params)
@@ -302,7 +302,7 @@ async fn timed_archival_block(
         "transactionDetails": "full",
         "rewards": false,
         "commitment": "confirmed",
-        "maxSupportedTransactionVersion": 0,
+        "maxSupportedTransactionVersion": 1,
     }]);
     let start = Instant::now();
     let resp = client.raw_call_checked(url, "getBlock", params).await;
@@ -346,7 +346,7 @@ async fn timed_archival_tx(
     let params = json!([signature, {
         "encoding": "json",
         "commitment": "confirmed",
-        "maxSupportedTransactionVersion": 0,
+        "maxSupportedTransactionVersion": 1,
     }]);
     let start = Instant::now();
     let resp = client.raw_call_checked(url, "getTransaction", params).await;
@@ -723,7 +723,7 @@ async fn judge_transaction(
     let params = json!([signature, {
         "encoding": "json",
         "commitment": "confirmed",
-        "maxSupportedTransactionVersion": 0,
+        "maxSupportedTransactionVersion": 1,
     }]);
     match client.raw_call_checked(url, "getTransaction", params).await {
         RawResponse::Result(value) if value.is_null() => "missing",
@@ -769,7 +769,7 @@ async fn node_block(
         "transactionDetails": "none",
         "rewards": false,
         "commitment": "confirmed",
-        "maxSupportedTransactionVersion": 0,
+        "maxSupportedTransactionVersion": 1,
     }]);
     let answer = match client.raw_call_checked(url, "getBlock", params).await {
         RawResponse::Result(block) => match block.get("blockhash").and_then(|h| h.as_str()) {
