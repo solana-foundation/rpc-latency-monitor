@@ -138,6 +138,9 @@ providers:
     url: "https://mainnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}"
   - name: quicknode
     url: "${QUICKNODE_URL}"
+  - name: solanavibestation
+    url: "https://elite.rpc.solanavibestation.com/?api_key=${SOLANAVIBESTATION_API_KEY}"
+    geos: [us-east, eu-central, eu-west]
   - name: triton
     url: "https://${TRITON_HOST}/${TRITON_TOKEN}"
 

@@ -141,6 +141,8 @@ providers:
     url: "${CHAINSTACK_URL}"
   - name: fluxrpc
     url: "https://cdn.fluxrpc.com?key=${FLUXRPC_KEY}"
+  - name: solanavibestation
+    url: "https://elite.rpc.solanavibestation.com/?api_key=${SOLANAVIBESTATION_API_KEY}"
 ```
 
 ### Checks
