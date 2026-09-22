@@ -164,7 +164,7 @@
           "condition": "C",
           "for": "30m",
           "noDataState": "OK",
-          "execErrState": "KeepLast",
+          "execErrState": "OK",
           "labels": {
             "severity": "warning",
             "service": "rpc-latency-monitor"
@@ -253,7 +253,7 @@
           "condition": "C",
           "for": "30m",
           "noDataState": "OK",
-          "execErrState": "KeepLast",
+          "execErrState": "OK",
           "labels": {
             "severity": "warning",
             "service": "rpc-latency-monitor"
@@ -342,7 +342,7 @@
           "condition": "C",
           "for": "0s",
           "noDataState": "OK",
-          "execErrState": "KeepLast",
+          "execErrState": "OK",
           "labels": {
             "severity": "warning",
             "service": "rpc-latency-monitor"
