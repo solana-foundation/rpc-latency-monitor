@@ -54,14 +54,14 @@ providers:
 
 checks:
   - method: get_health
-    interval: "60s"
-    jitter: "5s"
+    interval: "5s"
+    jitter: "1s"
   - method: get_slot
-    interval: "60s"
-    jitter: "5s"
+    interval: "2s"
+    jitter: "500ms"
   - method: get_latest_blockhash
-    interval: "60s"
-    jitter: "5s"
+    interval: "5s"
+    jitter: "1s"
   - method: get_account_info
     interval: "60s"
     jitter: "5s"
