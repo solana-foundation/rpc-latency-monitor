@@ -37,7 +37,7 @@ impl Metrics {
         let latency = HistogramVec::new(
             HistogramOpts::new("rpc_latency_seconds", "RPC request round-trip latency")
                 .buckets(LATENCY_BUCKETS.to_vec()),
-            &["provider", "method", "status", "target"],
+            &["provider", "method", "status"],
         )?;
         let slot_lag = IntGaugeVec::new(
             Opts::new(
@@ -145,9 +145,11 @@ impl Metrics {
         let status_label = status.label();
         let error_kind = status.error_kind().unwrap_or("none");
 
-        self.latency
-            .with_label_values(&[provider, method, status_label, target])
-            .observe(result.latency.as_secs_f64());
+        if matches!(status, CallStatus::Success) {
+            self.latency
+                .with_label_values(&[provider, method, status_label])
+                .observe(result.latency.as_secs_f64());
+        }
         self.requests
             .with_label_values(&[provider, method, status_label, error_kind, target])
             .inc();
@@ -229,6 +231,12 @@ mod tests {
         assert!(output.contains("region=\"test-region\""));
         assert!(output.contains("status=\"success\""));
         assert!(output.contains("error_kind=\"timeout\""));
+        assert!(!output
+            .lines()
+            .any(|l| l.starts_with("rpc_latency_seconds") && l.contains("status=\"error\"")));
+        assert!(!output
+            .lines()
+            .any(|l| l.starts_with("rpc_latency_seconds") && l.contains("target=")));
     }
 
     #[test]
