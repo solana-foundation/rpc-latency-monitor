@@ -13,7 +13,7 @@
           "condition": "C",
           "for": "10m",
           "noDataState": "Alerting",
-          "execErrState": "OK",
+          "execErrState": "Error",
           "labels": {
             "severity": "critical",
             "service": "rpc-latency-monitor"
