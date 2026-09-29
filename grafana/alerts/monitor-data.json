@@ -13,7 +13,7 @@
           "condition": "C",
           "for": "10m",
           "noDataState": "Alerting",
-          "execErrState": "Error",
+          "execErrState": "OK",
           "labels": {
             "severity": "critical",
             "service": "rpc-latency-monitor"
@@ -88,7 +88,7 @@
           "condition": "C",
           "for": "1h",
           "noDataState": "OK",
-          "execErrState": "Error",
+          "execErrState": "OK",
           "labels": {
             "severity": "warning",
             "service": "rpc-latency-monitor"
@@ -430,7 +430,7 @@
           "condition": "C",
           "for": "15m",
           "noDataState": "OK",
-          "execErrState": "Error",
+          "execErrState": "OK",
           "labels": {
             "severity": "warning",
             "service": "rpc-latency-monitor"
@@ -518,7 +518,7 @@
           "condition": "C",
           "for": "0s",
           "noDataState": "OK",
-          "execErrState": "Error",
+          "execErrState": "OK",
           "labels": {
             "severity": "warning",
             "service": "rpc-latency-monitor"
@@ -606,7 +606,7 @@
           "condition": "C",
           "for": "15m",
           "noDataState": "OK",
-          "execErrState": "Error",
+          "execErrState": "OK",
           "labels": {
             "severity": "warning",
             "service": "rpc-latency-monitor",
@@ -684,7 +684,7 @@
           "condition": "C",
           "for": "15m",
           "noDataState": "OK",
-          "execErrState": "Error",
+          "execErrState": "OK",
           "labels": {
             "severity": "warning",
             "service": "rpc-latency-monitor"
@@ -760,7 +760,7 @@
           "condition": "C",
           "for": "15m",
           "noDataState": "OK",
-          "execErrState": "Error",
+          "execErrState": "OK",
           "labels": {
             "severity": "warning",
             "service": "rpc-latency-monitor"
