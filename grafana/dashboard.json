@@ -53,7 +53,7 @@
         "name": "method",
         "type": "query",
         "datasource": { "type": "prometheus", "uid": "grafanacloud-prom" },
-        "query": "label_values(rpc_latency_seconds_count, method)",
+        "query": "label_values(rpc_requests_total, method)",
         "refresh": 2,
         "includeAll": false,
         "multi": false,
