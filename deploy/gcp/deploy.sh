@@ -30,7 +30,7 @@ push_alerts() {
   [ "$code" -ge 200 ] && [ "$code" -lt 300 ] || { echo "alert upsert failed (HTTP $code): $body" >&2; exit 1; }
   echo "pushed alert group $group"
 
-  local route="$REPO_ROOT/grafana/alerts/notification-policies.json" tree live merged
+  local route="$REPO_ROOT/grafana/alerts/notification-policies.json" tree live ns rt_url merged
   tree="$(curl -sS -f "$GRAFANA_API_URL/api/v1/provisioning/policies" -H "Authorization: Bearer $GRAFANA_API_TOKEN")"
   live="$(jq -c --slurpfile ours "$route" '[.routes[]? | select(.object_matchers == $ours[0].object_matchers)] | first' <<<"$tree")"
   if [ "${GRAFANA_APPLY_POLICY_ROUTE:-}" != "1" ]; then
@@ -41,13 +41,15 @@ push_alerts() {
     echo "notification route in sync"
     return 0
   fi
-  merged="$(jq --slurpfile ours "$route" \
-    '.routes = [$ours[0]] + [(.routes // [])[] | select(.object_matchers != $ours[0].object_matchers)]' <<<"$tree")"
-  body="$(curl -sS -w '\n%{http_code}' -X PUT \
-    "$GRAFANA_API_URL/api/v1/provisioning/policies" \
-    -H "Authorization: Bearer $GRAFANA_API_TOKEN" -H "Content-Type: application/json" \
-    -H "X-Disable-Provenance: true" -d "$merged")"
+  ns="$(curl -sS -f "$GRAFANA_API_URL/api/frontend/settings" -H "Authorization: Bearer $GRAFANA_API_TOKEN" | jq -r .namespace)"
+  rt_url="$GRAFANA_API_URL/apis/notifications.alerting.grafana.app/v0alpha1/namespaces/$ns/routingtrees/user-defined"
+  merged="$(curl -sS -f "$rt_url" -H "Authorization: Bearer $GRAFANA_API_TOKEN" | jq --slurpfile ours "$route" '
+    ($ours[0] | del(.object_matchers) + {matchers: [$ours[0].object_matchers[] | {label: .[0], type: .[1], value: .[2]}]}) as $r
+    | .spec.routes = [$r] + [(.spec.routes // [])[] | select(.matchers != $r.matchers)]')"
+  body="$(curl -sS -w '\n%{http_code}' -X PUT "$rt_url" \
+    -H "Authorization: Bearer $GRAFANA_API_TOKEN" -H "Content-Type: application/json" -d "$merged")"
   code="${body##*$'\n'}"; body="${body%$'\n'*}"
+  [ "$code" = "409" ] && { echo "policy tree changed since it was read; rerun to merge onto the latest version" >&2; exit 1; }
   [ "$code" -ge 200 ] && [ "$code" -lt 300 ] || { echo "policy route merge failed (HTTP $code): $body" >&2; exit 1; }
   echo "merged notification route"
 }
