@@ -23,7 +23,7 @@
       "title": "Provider economics",
       "datasource": {
         "type": "grafana-clickhouse-datasource",
-        "uid": "ffpadt3v6cpvkc"
+        "uid": "cfmjtgbkp63gge"
       },
       "gridPos": {
         "h": 9,
@@ -40,7 +40,7 @@
           "refId": "A",
           "datasource": {
             "type": "grafana-clickhouse-datasource",
-            "uid": "ffpadt3v6cpvkc"
+            "uid": "cfmjtgbkp63gge"
           },
           "editorType": "sql",
           "format": 1,
@@ -55,7 +55,7 @@
       "title": "Tipping transactions over time by provider",
       "datasource": {
         "type": "grafana-clickhouse-datasource",
-        "uid": "ffpadt3v6cpvkc"
+        "uid": "cfmjtgbkp63gge"
       },
       "gridPos": {
         "h": 8,
@@ -92,7 +92,7 @@
           "refId": "A",
           "datasource": {
             "type": "grafana-clickhouse-datasource",
-            "uid": "ffpadt3v6cpvkc"
+            "uid": "cfmjtgbkp63gge"
           },
           "editorType": "sql",
           "format": 1,
@@ -107,7 +107,7 @@
       "title": "Tipping transactions by provider",
       "datasource": {
         "type": "grafana-clickhouse-datasource",
-        "uid": "ffpadt3v6cpvkc"
+        "uid": "cfmjtgbkp63gge"
       },
       "gridPos": {
         "h": 8,
@@ -128,7 +128,7 @@
           "refId": "A",
           "datasource": {
             "type": "grafana-clickhouse-datasource",
-            "uid": "ffpadt3v6cpvkc"
+            "uid": "cfmjtgbkp63gge"
           },
           "editorType": "sql",
           "format": 1,
@@ -143,7 +143,7 @@
       "title": "Total tips by provider (SOL)",
       "datasource": {
         "type": "grafana-clickhouse-datasource",
-        "uid": "ffpadt3v6cpvkc"
+        "uid": "cfmjtgbkp63gge"
       },
       "gridPos": {
         "h": 8,
@@ -164,7 +164,7 @@
           "refId": "A",
           "datasource": {
             "type": "grafana-clickhouse-datasource",
-            "uid": "ffpadt3v6cpvkc"
+            "uid": "cfmjtgbkp63gge"
           },
           "editorType": "sql",
           "format": 1,
@@ -179,7 +179,7 @@
       "title": "Total fees by provider (SOL)",
       "datasource": {
         "type": "grafana-clickhouse-datasource",
-        "uid": "ffpadt3v6cpvkc"
+        "uid": "cfmjtgbkp63gge"
       },
       "gridPos": {
         "h": 8,
@@ -200,7 +200,7 @@
           "refId": "A",
           "datasource": {
             "type": "grafana-clickhouse-datasource",
-            "uid": "ffpadt3v6cpvkc"
+            "uid": "cfmjtgbkp63gge"
           },
           "editorType": "sql",
           "format": 1,

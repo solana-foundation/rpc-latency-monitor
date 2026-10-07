@@ -30,13 +30,26 @@ push_alerts() {
   [ "$code" -ge 200 ] && [ "$code" -lt 300 ] || { echo "alert upsert failed (HTTP $code): $body" >&2; exit 1; }
   echo "pushed alert group $group"
 
+  local route="$REPO_ROOT/grafana/alerts/notification-policies.json" tree live merged
+  tree="$(curl -sS -f "$GRAFANA_API_URL/api/v1/provisioning/policies" -H "Authorization: Bearer $GRAFANA_API_TOKEN")"
+  live="$(jq -c --slurpfile ours "$route" '[.routes[]? | select(.object_matchers == $ours[0].object_matchers)] | first' <<<"$tree")"
+  if [ "${GRAFANA_APPLY_POLICY_ROUTE:-}" != "1" ]; then
+    [ "$(jq -cS 'del(.provenance)' <<<"$live")" = "$(jq -cS . "$route")" ] || {
+      echo "notification route on $GRAFANA_API_URL differs from grafana/alerts/notification-policies.json; the tree is shared, so rerun with GRAFANA_APPLY_POLICY_ROUTE=1 by hand" >&2
+      exit 1
+    }
+    echo "notification route in sync"
+    return 0
+  fi
+  merged="$(jq --slurpfile ours "$route" \
+    '.routes = [$ours[0]] + [(.routes // [])[] | select(.object_matchers != $ours[0].object_matchers)]' <<<"$tree")"
   body="$(curl -sS -w '\n%{http_code}' -X PUT \
     "$GRAFANA_API_URL/api/v1/provisioning/policies" \
     -H "Authorization: Bearer $GRAFANA_API_TOKEN" -H "Content-Type: application/json" \
-    -H "X-Disable-Provenance: true" -d @"$REPO_ROOT/grafana/alerts/notification-policies.json")"
+    -H "X-Disable-Provenance: true" -d "$merged")"
   code="${body##*$'\n'}"; body="${body%$'\n'*}"
-  [ "$code" -ge 200 ] && [ "$code" -lt 300 ] || { echo "policy upsert failed (HTTP $code): $body" >&2; exit 1; }
-  echo "pushed notification policies"
+  [ "$code" -ge 200 ] && [ "$code" -lt 300 ] || { echo "policy route merge failed (HTTP $code): $body" >&2; exit 1; }
+  echo "merged notification route"
 }
 
 deploy_fleet() {
