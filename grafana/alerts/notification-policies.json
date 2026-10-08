@@ -1,12 +1,16 @@
 {
-  "receiver": "empty",
-  "group_by": ["grafana_folder", "alertname"],
-  "routes": [
-    {
-      "receiver": "rpc-latency-slack",
-      "group_by": ["alertname", "provider", "error_kind"],
-      "object_matchers": [["service", "=", "rpc-latency-monitor"]],
-      "repeat_interval": "7d"
-    }
-  ]
+  "receiver": "rpc-latency-slack",
+  "object_matchers": [
+    [
+      "grafana_folder",
+      "=",
+      "rpc-latency"
+    ]
+  ],
+  "group_by": [
+    "alertname",
+    "provider",
+    "error_kind"
+  ],
+  "repeat_interval": "1w"
 }

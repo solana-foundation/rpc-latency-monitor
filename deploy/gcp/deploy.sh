@@ -30,13 +30,28 @@ push_alerts() {
   [ "$code" -ge 200 ] && [ "$code" -lt 300 ] || { echo "alert upsert failed (HTTP $code): $body" >&2; exit 1; }
   echo "pushed alert group $group"
 
-  body="$(curl -sS -w '\n%{http_code}' -X PUT \
-    "$GRAFANA_API_URL/api/v1/provisioning/policies" \
-    -H "Authorization: Bearer $GRAFANA_API_TOKEN" -H "Content-Type: application/json" \
-    -H "X-Disable-Provenance: true" -d @"$REPO_ROOT/grafana/alerts/notification-policies.json")"
+  local route="$REPO_ROOT/grafana/alerts/notification-policies.json" tree live ns rt_url merged
+  tree="$(curl -sS -f "$GRAFANA_API_URL/api/v1/provisioning/policies" -H "Authorization: Bearer $GRAFANA_API_TOKEN")"
+  live="$(jq -c --slurpfile ours "$route" '[.routes[]? | select(.object_matchers == $ours[0].object_matchers)] | first' <<<"$tree")"
+  if [ "${GRAFANA_APPLY_POLICY_ROUTE:-}" != "1" ]; then
+    [ "$(jq -cS 'del(.provenance)' <<<"$live")" = "$(jq -cS . "$route")" ] || {
+      echo "notification route on $GRAFANA_API_URL differs from grafana/alerts/notification-policies.json; the tree is shared, so rerun with GRAFANA_APPLY_POLICY_ROUTE=1 by hand" >&2
+      exit 1
+    }
+    echo "notification route in sync"
+    return 0
+  fi
+  ns="$(curl -sS -f "$GRAFANA_API_URL/api/frontend/settings" -H "Authorization: Bearer $GRAFANA_API_TOKEN" | jq -r .namespace)"
+  rt_url="$GRAFANA_API_URL/apis/notifications.alerting.grafana.app/v0alpha1/namespaces/$ns/routingtrees/user-defined"
+  merged="$(curl -sS -f "$rt_url" -H "Authorization: Bearer $GRAFANA_API_TOKEN" | jq --slurpfile ours "$route" '
+    ($ours[0] | del(.object_matchers) + {matchers: [$ours[0].object_matchers[] | {label: .[0], type: .[1], value: .[2]}]}) as $r
+    | .spec.routes = [$r] + [(.spec.routes // [])[] | select(.matchers != $r.matchers)]')"
+  body="$(curl -sS -w '\n%{http_code}' -X PUT "$rt_url" \
+    -H "Authorization: Bearer $GRAFANA_API_TOKEN" -H "Content-Type: application/json" -d "$merged")"
   code="${body##*$'\n'}"; body="${body%$'\n'*}"
-  [ "$code" -ge 200 ] && [ "$code" -lt 300 ] || { echo "policy upsert failed (HTTP $code): $body" >&2; exit 1; }
-  echo "pushed notification policies"
+  [ "$code" = "409" ] && { echo "policy tree changed since it was read; rerun to merge onto the latest version" >&2; exit 1; }
+  [ "$code" -ge 200 ] && [ "$code" -lt 300 ] || { echo "policy route merge failed (HTTP $code): $body" >&2; exit 1; }
+  echo "merged notification route"
 }
 
 deploy_fleet() {
