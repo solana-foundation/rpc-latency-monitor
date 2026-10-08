@@ -17,4 +17,13 @@ prometheus.remote_write "grafana_cloud" {
       password = sys.env("GRAFANA_CLOUD_PROM_TOKEN")
     }
   }
+
+  endpoint {
+    url = sys.env("SF_PROM_URL")
+
+    basic_auth {
+      username = sys.env("SF_PROM_USER")
+      password = sys.env("SF_PROM_TOKEN")
+    }
+  }
 }
