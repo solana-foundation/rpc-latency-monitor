@@ -5,6 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 IMAGE_SHA="${IMAGE_SHA:-}"
 LIMIT="${LIMIT:-}"
+GRPC_BENCH_REF="${GRPC_BENCH_REF:-}"
 
 : "${IMAGE_SHA:?set IMAGE_SHA to an immutable build sha}"
 : "${MONITOR_DOPPLER_TOKEN:?VM Doppler service token, set via Doppler}"
@@ -41,6 +42,10 @@ VARS_FILE="$(mktemp)"
 chmod 600 "$VARS_FILE"
 trap 'rm -f "$VARS_FILE"' EXIT
 printf 'monitor_ref: "%s"\ndoppler_token: "%s"\n' "$IMAGE_SHA" "$MONITOR_DOPPLER_TOKEN" >"$VARS_FILE"
+if [ -n "$GRPC_BENCH_REF" ]; then
+  echo "grpc bench ref override: $GRPC_BENCH_REF"
+  printf 'grpc_bench_ref: "%s"\n' "$GRPC_BENCH_REF" >>"$VARS_FILE"
+fi
 
 cd "$SCRIPT_DIR"
 ansible-playbook site.yml \

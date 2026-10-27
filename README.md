@@ -259,6 +259,13 @@ providers); the original GCP fleet spans seven regions across North America, Eur
 
 Each container exports Prometheus metrics that are scraped locally and forwarded to Grafana Cloud.
 
+The bare-metal hosts also run the Yellowstone gRPC streaming benchmark from
+[grpc-latency-monitor](https://github.com/solana-foundation/grpc-latency-monitor) as a
+`grpc-bench` systemd unit beside `rpc-monitor` (ansible role `grpc_bench`). It writes to
+ClickHouse and is inert until `grpc_bench_ref` pins a commit on that repo's `main`. It reads
+`GRPC_BENCH_CH_URL` / `_USER` / `_PASSWORD` and, per provider, `GRPC_<NAME>_URL` (optionally
+`GRPC_<NAME>_URL_<REGION>`) and `GRPC_<NAME>_TOKEN` from Doppler.
+
 ## Dashboards
 
 Dashboards live in [`grafana/`](./grafana). The primary board, **RPC Latency Monitor**

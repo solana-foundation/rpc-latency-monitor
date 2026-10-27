@@ -19,6 +19,10 @@ on:
         options: [all, gcp, aws, latitude, tsw]
         default: all
         required: true
+      grpc_bench_ref:
+        description: "grpc-latency-monitor commit sha for metal hosts (blank = the pin in roles/grpc_bench/defaults)"
+        required: false
+        default: ""
   workflow_run:
     workflows: ["Build & Publish"]
     types: [completed]
@@ -155,10 +159,11 @@ jobs:
           PROJECT: ${{ vars.GCP_PROJECT_ID }}
           GCP_TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
           AWS_TF_STATE_BUCKET: ${{ vars.AWS_TF_STATE_BUCKET }}
+          GRPC_BENCH_REF: ${{ github.event.inputs.grpc_bench_ref || '' }}
         run: |
           set -euo pipefail
           doppler run --project "$DOPPLER_PROJECT" --config "$DOPPLER_CONFIG" -- \
-            env PROVIDER="$PROVIDER" IMAGE_SHA="$IMAGE_SHA" TARGET="$TARGET" \
+            env PROVIDER="$PROVIDER" IMAGE_SHA="$IMAGE_SHA" TARGET="$TARGET" GRPC_BENCH_REF="$GRPC_BENCH_REF" \
                 PROJECT="$PROJECT" REGION="$REGION" \
                 GCP_TF_STATE_BUCKET="$GCP_TF_STATE_BUCKET" AWS_TF_STATE_BUCKET="$AWS_TF_STATE_BUCKET" \
             ./deploy/deploy.sh

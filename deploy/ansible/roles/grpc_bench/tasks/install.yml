@@ -1,0 +1,182 @@
+- name: Assert grpc_bench_ref is an immutable commit sha
+  ansible.builtin.assert:
+    that:
+      - grpc_bench_ref is match('^[0-9a-f]{40}$')
+    fail_msg: "grpc_bench_ref must be a full 40-char commit sha, got {{ grpc_bench_ref }}"
+    quiet: true
+
+# codeload serves commits from anywhere in the fork network, so a fork-only sha
+# would otherwise build. Only deploy what has landed on the foundation's main.
+- name: Verify grpc_bench_ref is on {{ grpc_bench_repo }} main
+  ansible.builtin.uri:
+    url: "https://api.github.com/repos/{{ grpc_bench_repo }}/compare/{{ grpc_bench_ref }}...main"
+    headers:
+      Accept: application/vnd.github+json
+    return_content: true
+  register: grpc_bench_compare
+  retries: 3
+  delay: 5
+  until: grpc_bench_compare is succeeded
+  failed_when: >-
+    grpc_bench_compare.status != 200
+    or grpc_bench_compare.json.status not in ['ahead', 'identical']
+  delegate_to: localhost
+  run_once: true
+  become: false
+
+- name: Download benchmark source tarball at the pinned ref
+  ansible.builtin.get_url:
+    url: "{{ grpc_bench_tarball_url }}"
+    dest: "/tmp/grpc-latency-monitor-{{ grpc_bench_ref }}.tar.gz"
+    mode: "0644"
+  register: grpc_bench_tarball
+  retries: 5
+  delay: 10
+  until: grpc_bench_tarball is succeeded
+
+- name: Ensure benchmark source dir exists
+  ansible.builtin.file:
+    path: "{{ grpc_bench_src_dir }}"
+    state: directory
+    mode: "0755"
+
+- name: Clear previous benchmark source, keeping the cargo target cache
+  ansible.builtin.shell: >
+    find {{ grpc_bench_src_dir }} -mindepth 1 -maxdepth 1 ! -name target -exec rm -rf {} +
+  changed_when: true
+
+- name: Unpack benchmark source
+  ansible.builtin.unarchive:
+    src: "/tmp/grpc-latency-monitor-{{ grpc_bench_ref }}.tar.gz"
+    dest: "{{ grpc_bench_src_dir }}"
+    remote_src: true
+    extra_opts: ["--strip-components=1"]
+
+- name: Build benchmark (release, locked)
+  ansible.builtin.shell: |
+    source ~/.cargo/env && cargo build --release --locked
+  args:
+    chdir: "{{ grpc_bench_src_dir }}"
+    executable: /bin/bash
+  register: grpc_bench_build
+  changed_when: "'Compiling' in grpc_bench_build.stderr"
+
+- name: Compare built benchmark binary with installed
+  ansible.builtin.command: "cmp -s {{ grpc_bench_src_dir }}/target/release/solana-streaming-benchmark {{ grpc_bench_bin }}"
+  register: grpc_bench_bin_cmp
+  failed_when: false
+  changed_when: grpc_bench_bin_cmp.rc != 0
+
+- name: Install benchmark binary
+  ansible.builtin.copy:
+    src: "{{ grpc_bench_src_dir }}/target/release/solana-streaming-benchmark"
+    dest: "{{ grpc_bench_bin }}"
+    remote_src: true
+    owner: root
+    group: root
+    mode: "0755"
+  when: grpc_bench_bin_cmp.changed
+  become: true
+  notify: restart grpc-bench
+
+- name: Benchmark state dir (pending-write recovery metadata; must persist)
+  ansible.builtin.file:
+    path: "{{ grpc_bench_state_dir }}"
+    state: directory
+    owner: "{{ run_user }}"
+    group: "{{ run_user }}"
+    mode: "0750"
+  become: true
+
+- name: Download benchmark secrets
+  ansible.builtin.command: doppler secrets download --no-file --format json
+  environment:
+    DOPPLER_TOKEN: "{{ doppler_token }}"
+    DOPPLER_PROJECT: rpc-latency-monitor
+    DOPPLER_CONFIG: prd
+  register: grpc_bench_doppler
+  changed_when: false
+  no_log: true
+
+- name: Parse benchmark secrets
+  ansible.builtin.set_fact:
+    grpc_bench_secrets: "{{ grpc_bench_doppler.stdout | from_json }}"
+  no_log: true
+
+- name: Resolve benchmark subscriber location
+  ansible.builtin.set_fact:
+    grpc_bench_lat: "{{ grpc_bench_latitude | default(grpc_bench_coordinates[monitor_region][0] | default('')) }}"
+    grpc_bench_lon: "{{ grpc_bench_longitude | default(grpc_bench_coordinates[monitor_region][1] | default('')) }}"
+
+- name: Resolve benchmark providers
+  ansible.builtin.set_fact:
+    grpc_bench_resolved: "{{ grpc_bench_resolved | default([]) + [entry] }}"
+  vars:
+    key: "GRPC_{{ item | upper | regex_replace('[^A-Z0-9]', '_') }}"
+    region_key: "{{ key }}_URL_{{ monitor_region | upper | regex_replace('[^A-Z0-9]', '_') }}"
+    url: "{{ grpc_bench_secrets[region_key] | default(grpc_bench_secrets[key ~ '_URL'] | default('')) }}"
+    entry:
+      name: "{{ item }}"
+      url: "{{ url }}"
+      token_env: "{{ (grpc_bench_secrets[key ~ '_TOKEN'] | default('') | length > 0) | ternary(key ~ '_TOKEN', '') }}"
+  loop: "{{ grpc_bench_providers }}"
+  when: url | length > 0
+  no_log: true
+
+- name: Warn about providers without a URL secret
+  ansible.builtin.debug:
+    msg: "gRPC benchmark: skipping {{ item }} (no GRPC_{{ item | upper }}_URL in Doppler)"
+  loop: "{{ grpc_bench_providers | difference((grpc_bench_resolved | default([])) | map(attribute='name')) }}"
+
+- name: Assert benchmark inputs
+  ansible.builtin.assert:
+    that:
+      - (grpc_bench_resolved | default([])) | length >= 2
+      - grpc_bench_lat | string | length > 0
+      - grpc_bench_lon | string | length > 0
+      - grpc_bench_secrets.GRPC_BENCH_CH_URL | default('') | length > 0
+      - grpc_bench_secrets.GRPC_BENCH_CH_USER | default('') | length > 0
+      - grpc_bench_secrets.GRPC_BENCH_CH_PASSWORD | default('') | length > 0
+    fail_msg: >-
+      gRPC benchmark needs >=2 providers with GRPC_<NAME>_URL, coordinates for
+      region {{ monitor_region }} (grpc_bench_coordinates or host vars), and
+      GRPC_BENCH_CH_URL/USER/PASSWORD in Doppler
+    quiet: true
+
+- name: Write benchmark env file
+  ansible.builtin.template:
+    src: grpc-bench.env.j2
+    dest: "{{ grpc_bench_env_file }}"
+    owner: root
+    group: "{{ run_user }}"
+    mode: "0640"
+  no_log: true
+  become: true
+  notify: restart grpc-bench
+
+- name: Install benchmark config
+  ansible.builtin.template:
+    src: grpc-bench.yaml.j2
+    dest: "{{ grpc_bench_conf }}"
+    owner: root
+    group: "{{ run_user }}"
+    mode: "0640"
+  no_log: true
+  become: true
+  notify: restart grpc-bench
+
+- name: Install grpc-bench unit
+  ansible.builtin.template:
+    src: grpc-bench.service.j2
+    dest: /etc/systemd/system/grpc-bench.service
+    mode: "0644"
+  become: true
+  notify: restart grpc-bench
+
+- name: Enable + start grpc-bench
+  ansible.builtin.systemd:
+    name: grpc-bench
+    enabled: true
+    state: started
+    daemon_reload: true
+  become: true

@@ -1,0 +1,8 @@
+- name: Skip gRPC benchmark (grpc_bench_ref not pinned)
+  ansible.builtin.debug:
+    msg: "grpc_bench_ref is empty; gRPC benchmark not deployed"
+  when: grpc_bench_ref | length == 0
+
+- name: Deploy gRPC benchmark
+  ansible.builtin.include_tasks: install.yml
+  when: grpc_bench_ref | length > 0

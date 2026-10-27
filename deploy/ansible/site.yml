@@ -3,3 +3,4 @@
   gather_facts: true
   roles:
     - monitor
+    - grpc_bench

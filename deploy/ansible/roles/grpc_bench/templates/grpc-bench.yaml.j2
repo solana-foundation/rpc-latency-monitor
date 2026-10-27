@@ -1,0 +1,38 @@
+# Rendered by ansible (roles/grpc_bench). Tuning mirrors config.example.yaml in
+# {{ grpc_bench_repo }}@{{ grpc_bench_ref[:7] }}.
+state_dir: {{ grpc_bench_state_dir | to_json }}
+batch_size: 50000
+arrival_buffer_capacity: 10000
+storage_buffer_capacity: 100000
+matcher_key_capacity: 100000
+flush_interval: "1s"
+window: "5s"
+processing_grace: "2s"
+expired_key_retention: "2m"
+connection_warmup: "1s"
+slot_confirmation_timeout: "30s"
+
+filters:
+  accounts_owner: {{ grpc_bench_filters.accounts_owner | to_json }}
+  transactions_account_include: {{ grpc_bench_filters.transactions_account_include | to_json }}
+
+subscriber:
+  region: {{ monitor_region | to_json }}
+  cloud_provider: {{ monitor_infra | to_json }}
+  latitude: {{ grpc_bench_lat | float }}
+  longitude: {{ grpc_bench_lon | float }}
+
+providers:
+{% for p in grpc_bench_resolved %}
+  - name: {{ p.name | to_json }}
+    url: {{ p.url | to_json }}
+{% if p.token_env %}
+    token_env: {{ p.token_env | to_json }}
+{% endif %}
+{% endfor %}
+
+clickhouse:
+  url: {{ grpc_bench_secrets.GRPC_BENCH_CH_URL | to_json }}
+  database: {{ grpc_bench_ch_database | to_json }}
+  user_env: "GRPC_BENCH_CH_USER"
+  password_env: "GRPC_BENCH_CH_PASSWORD"

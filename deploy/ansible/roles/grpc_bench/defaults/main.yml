@@ -1,0 +1,51 @@
+---
+# Full 40-char commit sha on solana-foundation/grpc-latency-monitor main. Empty
+# skips the benchmark entirely, so this role is inert until a sha is pinned here
+# (or passed as GRPC_BENCH_REF to deploy.sh).
+grpc_bench_ref: ""
+grpc_bench_repo: "solana-foundation/grpc-latency-monitor"
+grpc_bench_tarball_url: "https://codeload.github.com/{{ grpc_bench_repo }}/tar.gz/{{ grpc_bench_ref }}"
+grpc_bench_src_dir: "{{ ansible_user_dir }}/grpc-latency-monitor-src"
+grpc_bench_bin: "/usr/local/bin/solana-streaming-benchmark"
+
+grpc_bench_conf: "{{ conf_dir }}/grpc-bench.yaml"
+grpc_bench_env_file: "{{ conf_dir }}/grpc-bench.env"
+grpc_bench_state_dir: "{{ data_dir }}/grpc-bench-state"
+# Keeps a runaway benchmark from starving rpc-monitor on the shared box.
+grpc_bench_memory_max: "4G"
+
+grpc_bench_ch_database: "benchmark"
+
+# Doppler keys per provider: GRPC_<NAME>_URL (or GRPC_<NAME>_URL_<REGION> to
+# override for one region) and optional GRPC_<NAME>_TOKEN (Yellowstone x-token).
+# Providers without a URL secret are skipped with a warning.
+grpc_bench_providers:
+  - helius
+  - triton
+  - quicknode
+  - chainstack
+
+grpc_bench_filters:
+  accounts_owner:
+    - "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA"
+  transactions_account_include:
+    - "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA"
+
+# Datacenter-city coordinates per monitor_region. Override per host with
+# grpc_bench_latitude / grpc_bench_longitude.
+grpc_bench_coordinates:
+  nyc: [40.7128, -74.0060]
+  ewr2: [40.7357, -74.1724]
+  pit1: [40.4406, -79.9959]
+  lax: [34.0522, -118.2437]
+  lax1: [34.0522, -118.2437]
+  lon: [51.5074, -0.1278]
+  lon1: [51.5074, -0.1278]
+  fra: [50.1109, 8.6821]
+  fra2: [50.1109, 8.6821]
+  ams: [52.3676, 4.9041]
+  ams3: [52.3676, 4.9041]
+  tyo: [35.6762, 139.6503]
+  tyo2: [35.6762, 139.6503]
+  sgp: [1.3521, 103.8198]
+  sgp2: [1.3521, 103.8198]

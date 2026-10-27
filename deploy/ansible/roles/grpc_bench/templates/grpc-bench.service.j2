@@ -1,0 +1,32 @@
+[Unit]
+Description=solana-streaming-benchmark (Yellowstone gRPC)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User={{ run_user }}
+Group={{ run_user }}
+WorkingDirectory={{ grpc_bench_state_dir }}
+EnvironmentFile={{ grpc_bench_env_file }}
+Environment=RUST_LOG=info
+ExecStart={{ grpc_bench_bin }} --config {{ grpc_bench_conf }}
+Restart=always
+RestartSec=5s
+LimitNOFILE=65536
+MemoryMax={{ grpc_bench_memory_max }}
+# Matcher drain + writer timeouts (60s) + final minute rollups (150s).
+TimeoutStopSec=240
+KillSignal=SIGTERM
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ProtectControlGroups=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target
