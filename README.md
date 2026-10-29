@@ -264,7 +264,7 @@ The bare-metal hosts also run the Yellowstone gRPC streaming benchmark from
 `grpc-bench` systemd unit beside `rpc-monitor` (ansible role `grpc_bench`, pinned by
 `grpc_bench_ref`). It compares Helius LaserStream (nearest region) and Triton, and writes
 to the `benchmark` database on the geyser FRA ClickHouse (`clickhouse.tradeonsolana.com`,
-user `benchmark_writer`). Grafana reads it through the `clickhouse-on-prem` datasource.
+user `benchmark_writer`). Grafana reads it through the `benchmark-clickhouse` datasource (same host, `grafana_readonly`, default database `benchmark`).
 It rolls out separately from rpc-monitor (`deploy/ansible/grpc-bench.yml`, its own Deploy-workflow
 step and `Deploy gRPC Benchmark` Slack messages): on every manual dispatch that reaches metal
 hosts, and on auto-deploys only when the merged commit touches its deploy files. Each rollout runs
