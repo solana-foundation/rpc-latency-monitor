@@ -385,21 +385,13 @@ fn classify(status: StatusCode, body: &[u8], method: RpcMethod, ctx: &RequestCon
     if !method.is_valid_result(result, ctx) {
         return Parsed::error(ErrorKind::Empty);
     }
-    let anchored_gsfa =
-        matches!(method, RpcMethod::GetSignaturesForAddress) && ctx.gsfa_anchor.is_some();
     Parsed {
         status: CallStatus::Success,
-        observed_slot: (!anchored_gsfa)
-            .then(|| method.observed_slot(result))
-            .flatten(),
-        signature: (!anchored_gsfa)
-            .then(|| method.recent_signature(result))
-            .flatten(),
+        observed_slot: method.observed_slot(result),
+        signature: method.recent_signature(result),
         archival_signature: method.archival_signature(result),
         accounts: method.recent_accounts(result),
-        claim: (!anchored_gsfa)
-            .then(|| method.claim_payload(result, ctx))
-            .flatten(),
+        claim: method.claim_payload(result, ctx),
     }
 }
 
@@ -481,7 +473,7 @@ mod tests {
         let parsed = classify(
             StatusCode::OK,
             &body(r#"{"jsonrpc":"2.0","result":[{"signature":"abc","slot":5}],"id":1}"#),
-            RpcMethod::GetSignaturesForAddress,
+            RpcMethod::GetSignaturesForAddressRecent,
             &RequestContext::default(),
         );
         assert_eq!(parsed.signature, Some("abc".to_string()));
@@ -496,7 +488,7 @@ mod tests {
         let parsed = classify(
             StatusCode::OK,
             &body(r#"{"jsonrpc":"2.0","result":[{"signature":"old","slot":50}],"id":1}"#),
-            RpcMethod::GetSignaturesForAddress,
+            RpcMethod::GetSignaturesForAddressArchival,
             &ctx,
         );
         assert_eq!(parsed.status, CallStatus::Success);
@@ -514,7 +506,7 @@ mod tests {
         let parsed = classify(
             StatusCode::OK,
             &body(r#"{"jsonrpc":"2.0","result":[{"signature":"new","slot":100}],"id":1}"#),
-            RpcMethod::GetSignaturesForAddress,
+            RpcMethod::GetSignaturesForAddressArchival,
             &ctx,
         );
         assert_eq!(parsed.status, CallStatus::Error(ErrorKind::Empty));

@@ -45,7 +45,9 @@ pub fn spawn_checks(
             .filter(|check| {
                 !matches!(
                     check.method,
-                    RpcMethod::GetBlockArchival | RpcMethod::GetTransactionArchival
+                    RpcMethod::GetBlockArchival
+                        | RpcMethod::GetTransactionArchival
+                        | RpcMethod::GetSignaturesForAddressArchival
                 )
             })
             .map(|check| CheckTask {
@@ -117,7 +119,7 @@ impl CheckTask {
                 rotation,
             );
             rotation = rotation.wrapping_add(1);
-            let gsfa_anchor = (self.check.method == RpcMethod::GetSignaturesForAddress
+            let gsfa_anchor = (self.check.method == RpcMethod::GetSignaturesForAddressRecent
                 && rotation.is_multiple_of(2))
             .then(|| self.archival_anchor.current())
             .flatten()
@@ -135,9 +137,14 @@ impl CheckTask {
                 gpa_target,
                 gsfa_anchor,
             };
+            let method = if ctx.gsfa_anchor.is_some() {
+                RpcMethod::GetSignaturesForAddressArchival
+            } else {
+                self.check.method
+            };
             if let Some(result) = self
                 .client
-                .call(&self.url, self.check.method, &ctx, self.check.timeout)
+                .call(&self.url, method, &ctx, self.check.timeout)
                 .await
             {
                 let target = if ctx.gsfa_anchor.is_some() {
@@ -145,14 +152,13 @@ impl CheckTask {
                 } else {
                     ctx.gpa_target.as_ref().map_or("", |t| t.name.as_str())
                 };
-                self.record(&result, target);
+                self.record(method, &result, target);
             }
             sleep(self.next_delay()).await;
         }
     }
 
-    fn record(&self, result: &CallResult, target: &str) {
-        let method = self.check.method;
+    fn record(&self, method: RpcMethod, result: &CallResult, target: &str) {
         let status = if self.is_stale(result) {
             CallStatus::Error(ErrorKind::Stale)
         } else {
