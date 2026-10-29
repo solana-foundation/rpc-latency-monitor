@@ -294,6 +294,26 @@ mod tests {
         assert!(!stale_by_lag(Some(500), Some(900), 150));
     }
 
+    #[test]
+    fn future_provider_slot_only_affects_the_current_endpoint_window() {
+        let reference = ReferenceSlot::new();
+        reference.observe_endpoint(100);
+
+        let future_slot = 1_000_000;
+        assert!(!stale_by_lag(reference.current(), Some(future_slot), 30));
+
+        // CheckTask::record observes a successful provider slot only after the
+        // stale decision above, so the accepted value becomes the shared tip.
+        reference.observe(future_slot);
+
+        assert!(stale_by_lag(reference.current(), Some(101), 30));
+        assert_eq!(reference.lag_for(101), Some(999_899));
+
+        reference.observe_endpoint(101);
+        assert!(!stale_by_lag(reference.current(), Some(101), 30));
+        assert_eq!(reference.lag_for(101), Some(0));
+    }
+
     fn named_targets(names: &[&str]) -> Vec<GpaTarget> {
         names
             .iter()
