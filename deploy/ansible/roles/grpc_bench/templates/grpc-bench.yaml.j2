@@ -1,6 +1,9 @@
 # Rendered by ansible (roles/grpc_bench). Tuning mirrors config.example.yaml in
 # {{ grpc_bench_repo }}@{{ grpc_bench_ref[:7] }}.
 state_dir: {{ grpc_bench_state_dir | to_json }}
+slot_validation:
+  rpc_url_env: "GRPC_BENCH_REFERENCE_RPC_URL"
+  slot_buffer: 25
 batch_size: 50000
 arrival_buffer_capacity: 10000
 storage_buffer_capacity: 100000
@@ -32,7 +35,7 @@ providers:
 {% endfor %}
 
 clickhouse:
-  url: {{ grpc_bench_secrets.GRPC_BENCH_CH_URL | to_json }}
+  url: {{ grpc_bench_ch_url | to_json }}
   database: {{ grpc_bench_ch_database | to_json }}
   user_env: "GRPC_BENCH_CH_USER"
   password_env: "GRPC_BENCH_CH_PASSWORD"

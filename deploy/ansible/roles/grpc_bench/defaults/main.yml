@@ -1,8 +1,7 @@
 ---
-# Full 40-char commit sha on solana-foundation/grpc-latency-monitor main. Empty
-# skips the benchmark entirely, so this role is inert until a sha is pinned here
-# (or passed as GRPC_BENCH_REF to deploy.sh).
-grpc_bench_ref: ""
+# Full 40-char commit sha on solana-foundation/grpc-latency-monitor main
+# (override per deploy with GRPC_BENCH_REF). Empty skips the benchmark.
+grpc_bench_ref: "25766a5e1bd5f072a05238e1e267fba011b5d05b"
 grpc_bench_repo: "solana-foundation/grpc-latency-monitor"
 grpc_bench_tarball_url: "https://codeload.github.com/{{ grpc_bench_repo }}/tar.gz/{{ grpc_bench_ref }}"
 grpc_bench_src_dir: "{{ ansible_user_dir }}/grpc-latency-monitor-src"
@@ -16,14 +15,45 @@ grpc_bench_memory_max: "4G"
 
 grpc_bench_ch_database: "benchmark"
 
-# Doppler keys per provider: GRPC_<NAME>_URL (or GRPC_<NAME>_URL_<REGION> to
-# override for one region) and optional GRPC_<NAME>_TOKEN (Yellowstone x-token).
-# Providers without a URL secret are skipped with a warning.
+# Goose runs the benchmark's ClickHouse migrations once per deploy (from one
+# host, over HTTPS) before any subscriber starts.
+grpc_bench_goose_version: "v3.28.0"
+grpc_bench_goose_sha256: "ab073515b78ef345f64f018c0d79aa7db50106806efc686dda7181253765ae13"
+grpc_bench_goose_bin: "/usr/local/bin/goose"
+
+# Trusted HTTP(S) RPC for getSlot plausibility checks (3 requests/s per host).
+# Doppler GRPC_BENCH_REFERENCE_RPC_URL overrides this.
+grpc_bench_reference_rpc_url: "https://api.mainnet.solana.com"
+
+# Each provider needs a URL (`url`, or a bare host in Doppler `url_secret`) and
+# optionally an x-token Doppler key (`token_secret`). A provider whose secrets
+# are missing is skipped with a warning; at least two must resolve.
+# Each provider opens 5 gRPC connections per host.
 grpc_bench_providers:
-  - helius
-  - triton
-  - quicknode
-  - chainstack
+  - name: helius
+    url: "{{ 'https://laserstream-mainnet-' ~ grpc_bench_helius_regions[monitor_region] ~ '.helius-rpc.com' if monitor_region in grpc_bench_helius_regions else '' }}"
+    token_secret: HELIUS_API_KEY
+  - name: triton
+    url_secret: TRITON_HOST
+    token_secret: TRITON_TOKEN
+
+# Nearest Helius LaserStream region per monitor_region.
+grpc_bench_helius_regions:
+  nyc: ewr
+  ewr2: ewr
+  pit1: pitt
+  lax: lax
+  lax1: lax
+  lon: lon
+  lon1: lon
+  fra: fra
+  fra2: fra
+  ams: ams
+  ams3: ams
+  tyo: tyo
+  tyo2: tyo
+  sgp: sgp
+  sgp2: sgp
 
 grpc_bench_filters:
   accounts_owner:

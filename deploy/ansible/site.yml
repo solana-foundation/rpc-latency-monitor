@@ -3,4 +3,11 @@
   gather_facts: true
   roles:
     - monitor
+
+# Separate play so rpc-monitor's handlers flush first: a benchmark failure on a
+# host can't strand that host's pending monitor restart.
+- name: Deploy the Yellowstone gRPC benchmark beside rpc-monitor
+  hosts: tsw:latitude
+  gather_facts: true
+  roles:
     - grpc_bench

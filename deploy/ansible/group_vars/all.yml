@@ -1,0 +1,5 @@
+---
+# Shared by the monitor and grpc_bench roles, which run in separate plays.
+conf_dir: "/etc/rpc-latency-monitor"
+data_dir: "/var/lib/rpc-latency-monitor"
+run_user: "rpc-monitor"

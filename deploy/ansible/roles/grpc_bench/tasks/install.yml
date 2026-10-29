@@ -112,21 +112,33 @@
   ansible.builtin.set_fact:
     grpc_bench_resolved: "{{ grpc_bench_resolved | default([]) + [entry] }}"
   vars:
-    key: "GRPC_{{ item | upper | regex_replace('[^A-Z0-9]', '_') }}"
-    region_key: "{{ key }}_URL_{{ monitor_region | upper | regex_replace('[^A-Z0-9]', '_') }}"
-    url: "{{ grpc_bench_secrets[region_key] | default(grpc_bench_secrets[key ~ '_URL'] | default('')) }}"
+    host: "{{ grpc_bench_secrets[item.url_secret] | default('') if item.url_secret is defined else '' }}"
+    url: "{{ item.url | default(('https://' ~ host) if host | length > 0 else '') }}"
+    token: "{{ grpc_bench_secrets[item.token_secret] | default('') if item.token_secret is defined else '' }}"
     entry:
-      name: "{{ item }}"
+      name: "{{ item.name }}"
       url: "{{ url }}"
-      token_env: "{{ (grpc_bench_secrets[key ~ '_TOKEN'] | default('') | length > 0) | ternary(key ~ '_TOKEN', '') }}"
+      token_env: "{{ ('GRPC_BENCH_' ~ (item.name | upper | regex_replace('[^A-Z0-9]', '_')) ~ '_TOKEN') if token | length > 0 else '' }}"
+      token: "{{ token }}"
   loop: "{{ grpc_bench_providers }}"
-  when: url | length > 0
+  loop_control:
+    label: "{{ item.name }}"
+  when: url | length > 0 and (item.token_secret is not defined or token | length > 0)
   no_log: true
 
-- name: Warn about providers without a URL secret
+- name: Warn about providers without secrets
   ansible.builtin.debug:
-    msg: "gRPC benchmark: skipping {{ item }} (no GRPC_{{ item | upper }}_URL in Doppler)"
-  loop: "{{ grpc_bench_providers | difference((grpc_bench_resolved | default([])) | map(attribute='name')) }}"
+    msg: "gRPC benchmark: skipping {{ item }} on {{ monitor_region }} (URL or token secret missing)"
+  loop: "{{ grpc_bench_providers | map(attribute='name') | difference((grpc_bench_resolved | default([])) | map(attribute='name')) }}"
+
+- name: Resolve benchmark environment
+  ansible.builtin.set_fact:
+    grpc_bench_env:
+      GRPC_BENCH_CH_USER: "{{ grpc_bench_secrets.GRPC_BENCH_CH_USER | default('') }}"
+      GRPC_BENCH_CH_PASSWORD: "{{ grpc_bench_secrets.GRPC_BENCH_CH_PASSWORD | default('') }}"
+      GRPC_BENCH_REFERENCE_RPC_URL: "{{ grpc_bench_secrets.GRPC_BENCH_REFERENCE_RPC_URL | default(grpc_bench_reference_rpc_url, true) }}"
+    grpc_bench_ch_url: "{{ grpc_bench_secrets.GRPC_BENCH_CH_URL | default('') }}"
+  no_log: true
 
 - name: Assert benchmark inputs
   ansible.builtin.assert:
@@ -134,14 +146,58 @@
       - (grpc_bench_resolved | default([])) | length >= 2
       - grpc_bench_lat | string | length > 0
       - grpc_bench_lon | string | length > 0
-      - grpc_bench_secrets.GRPC_BENCH_CH_URL | default('') | length > 0
-      - grpc_bench_secrets.GRPC_BENCH_CH_USER | default('') | length > 0
-      - grpc_bench_secrets.GRPC_BENCH_CH_PASSWORD | default('') | length > 0
+      - grpc_bench_ch_url | length > 0
+      - grpc_bench_env.GRPC_BENCH_CH_USER | length > 0
+      - grpc_bench_env.GRPC_BENCH_CH_PASSWORD | length > 0
     fail_msg: >-
-      gRPC benchmark needs >=2 providers with GRPC_<NAME>_URL, coordinates for
-      region {{ monitor_region }} (grpc_bench_coordinates or host vars), and
-      GRPC_BENCH_CH_URL/USER/PASSWORD in Doppler
+      gRPC benchmark needs >=2 providers with their URL/token secrets,
+      coordinates for region {{ monitor_region }} (grpc_bench_coordinates or
+      host vars), and GRPC_BENCH_CH_URL/USER/PASSWORD in Doppler
     quiet: true
+
+# One host migrates for the whole deploy; the linear strategy finishes this
+# before any host reaches the service start below.
+- name: Migrate benchmark ClickHouse schema
+  run_once: true
+  block:
+    - name: Install goose
+      ansible.builtin.get_url:
+        url: "https://github.com/pressly/goose/releases/download/{{ grpc_bench_goose_version }}/goose_linux_x86_64"
+        dest: "{{ grpc_bench_goose_bin }}"
+        checksum: "sha256:{{ grpc_bench_goose_sha256 }}"
+        mode: "0755"
+      become: true
+
+    - name: Create benchmark database
+      ansible.builtin.uri:
+        url: "{{ grpc_bench_ch_url }}/"
+        method: POST
+        body: "CREATE DATABASE IF NOT EXISTS {{ grpc_bench_ch_database }}"
+        url_username: "{{ grpc_bench_env.GRPC_BENCH_CH_USER }}"
+        url_password: "{{ grpc_bench_env.GRPC_BENCH_CH_PASSWORD }}"
+        force_basic_auth: true
+      no_log: true
+
+    - name: Apply benchmark migrations
+      ansible.builtin.command:
+        argv:
+          - "{{ grpc_bench_goose_bin }}"
+          - -table
+          - benchmark_goose_db_version
+          - up
+      args:
+        chdir: "{{ grpc_bench_src_dir }}"
+      environment:
+        GOOSE_DRIVER: clickhouse
+        GOOSE_MIGRATION_DIR: sql/migrations
+        GOOSE_DBSTRING: >-
+          {{ grpc_bench_ch_url | urlsplit('scheme') }}://{{
+          grpc_bench_env.GRPC_BENCH_CH_USER | urlencode | replace('/', '%2F') }}:{{
+          grpc_bench_env.GRPC_BENCH_CH_PASSWORD | urlencode | replace('/', '%2F') }}@{{
+          grpc_bench_ch_url | urlsplit('netloc') }}/{{ grpc_bench_ch_database }}
+      register: grpc_bench_goose
+      changed_when: "'OK ' in grpc_bench_goose.stderr"
+      no_log: true
 
 - name: Write benchmark env file
   ansible.builtin.template:

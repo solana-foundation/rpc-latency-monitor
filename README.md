@@ -261,10 +261,13 @@ Each container exports Prometheus metrics that are scraped locally and forwarded
 
 The bare-metal hosts also run the Yellowstone gRPC streaming benchmark from
 [grpc-latency-monitor](https://github.com/solana-foundation/grpc-latency-monitor) as a
-`grpc-bench` systemd unit beside `rpc-monitor` (ansible role `grpc_bench`). It writes to
-ClickHouse and is inert until `grpc_bench_ref` pins a commit on that repo's `main`. It reads
-`GRPC_BENCH_CH_URL` / `_USER` / `_PASSWORD` and, per provider, `GRPC_<NAME>_URL` (optionally
-`GRPC_<NAME>_URL_<REGION>`) and `GRPC_<NAME>_TOKEN` from Doppler.
+`grpc-bench` systemd unit beside `rpc-monitor` (ansible role `grpc_bench`, pinned by
+`grpc_bench_ref`). It compares Helius LaserStream (nearest region) and Triton, and writes
+to the `benchmark` database on the geyser FRA ClickHouse (`clickhouse.tradeonsolana.com`,
+user `benchmark_writer`). Grafana reads it through the `clickhouse-on-prem` datasource.
+Each deploy runs the benchmark's Goose migrations once before any subscriber starts.
+Doppler keys: `GRPC_BENCH_CH_URL` / `_USER` / `_PASSWORD`, `HELIUS_API_KEY`, `TRITON_HOST`,
+`TRITON_TOKEN`, and optionally `GRPC_BENCH_REFERENCE_RPC_URL` (default: the public mainnet RPC).
 
 ## Dashboards
 

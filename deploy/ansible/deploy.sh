@@ -51,3 +51,24 @@ cd "$SCRIPT_DIR"
 ansible-playbook site.yml \
   ${LIMIT:+--limit "$LIMIT"} \
   --extra-vars "@${VARS_FILE}"
+
+# Publish the benchmark dashboards at the same ref the hosts now run, so panels
+# never expect a schema the subscribers aren't writing yet. They query the
+# `benchmark-clickhouse` datasource (geyser FRA ClickHouse, database benchmark).
+BENCH_REF="${GRPC_BENCH_REF:-$(sed -n 's/^grpc_bench_ref: "\([0-9a-f]*\)"$/\1/p' roles/grpc_bench/defaults/main.yml)}"
+if [ -z "$BENCH_REF" ]; then
+  echo "note: no grpc_bench_ref pinned — benchmark dashboards not published"
+elif [ -z "${GRAFANA_API_URL:-}" ] || [ -z "${GRAFANA_API_TOKEN:-}" ]; then
+  echo "warn: GRAFANA_API_URL/GRAFANA_API_TOKEN unset — benchmark dashboards not published"
+else
+  for name in solana-streaming-benchmark solana-streaming-head-to-head solana-streaming-overview; do
+    src="https://raw.githubusercontent.com/solana-foundation/grpc-latency-monitor/${BENCH_REF}/grafana/${name}.json"
+    curl -sS --fail-with-body "$src" \
+      | jq --arg folder "${GRAFANA_FOLDER_UID:-}" \
+        '{dashboard: (. + {id: null}), folderUid: $folder, overwrite: true}' \
+      | curl -sS --fail-with-body -X POST "$GRAFANA_API_URL/api/dashboards/db" \
+        -H "Authorization: Bearer $GRAFANA_API_TOKEN" -H "Content-Type: application/json" \
+        --data-binary @- >/dev/null
+    echo "published dashboard ${name} @ ${BENCH_REF:0:7}"
+  done
+fi
