@@ -61,24 +61,6 @@
   register: grpc_bench_build
   changed_when: "'Compiling' in grpc_bench_build.stderr"
 
-- name: Compare built benchmark binary with installed
-  ansible.builtin.command: "cmp -s {{ grpc_bench_src_dir }}/target/release/solana-streaming-benchmark {{ grpc_bench_bin }}"
-  register: grpc_bench_bin_cmp
-  failed_when: false
-  changed_when: grpc_bench_bin_cmp.rc != 0
-
-- name: Install benchmark binary
-  ansible.builtin.copy:
-    src: "{{ grpc_bench_src_dir }}/target/release/solana-streaming-benchmark"
-    dest: "{{ grpc_bench_bin }}"
-    remote_src: true
-    owner: root
-    group: root
-    mode: "0755"
-  when: grpc_bench_bin_cmp.changed
-  become: true
-  notify: restart grpc-bench
-
 - name: Benchmark state dir (pending-write recovery metadata; must persist)
   ansible.builtin.file:
     path: "{{ grpc_bench_state_dir }}"
@@ -227,6 +209,39 @@
     src: grpc-bench.service.j2
     dest: /etc/systemd/system/grpc-bench.service
     mode: "0644"
+  become: true
+  notify: restart grpc-bench
+
+# Swap the binary last, after every task that can fail: a failure in between
+# would drop the queued restart, and on retry the binary already matches, so
+# the old process would keep running.
+- name: Compare built benchmark binary with installed
+  ansible.builtin.command: "cmp -s {{ grpc_bench_src_dir }}/target/release/solana-streaming-benchmark {{ grpc_bench_bin }}"
+  register: grpc_bench_bin_cmp
+  failed_when: false
+  changed_when: grpc_bench_bin_cmp.rc != 0
+
+- name: Install benchmark binary
+  ansible.builtin.copy:
+    src: "{{ grpc_bench_src_dir }}/target/release/solana-streaming-benchmark"
+    dest: "{{ grpc_bench_bin }}"
+    remote_src: true
+    owner: root
+    group: root
+    mode: "0755"
+  when: grpc_bench_bin_cmp.changed
+  become: true
+  notify: restart grpc-bench
+
+# Catches a process still on an older binary however it got there; a replaced
+# binary shows as "<path> (deleted)" in /proc.
+- name: Check the running benchmark is the installed binary
+  ansible.builtin.shell: |
+    pid=$(systemctl show -p MainPID --value grpc-bench 2>/dev/null || echo 0)
+    [ "${pid:-0}" = 0 ] || [ "$(readlink /proc/$pid/exe)" = "{{ grpc_bench_bin }}" ]
+  register: grpc_bench_running_exe
+  failed_when: false
+  changed_when: grpc_bench_running_exe.rc != 0
   become: true
   notify: restart grpc-bench
 
