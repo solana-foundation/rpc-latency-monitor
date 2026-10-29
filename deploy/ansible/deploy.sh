@@ -3,15 +3,23 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# PLAYBOOK=monitor.yml (rpc-monitor, needs IMAGE_SHA) or grpc-bench.yml (the
+# gRPC benchmark, optional GRPC_BENCH_REF, then publishes its dashboards).
+PLAYBOOK="${PLAYBOOK:-monitor.yml}"
 IMAGE_SHA="${IMAGE_SHA:-}"
 LIMIT="${LIMIT:-}"
 GRPC_BENCH_REF="${GRPC_BENCH_REF:-}"
 
-: "${IMAGE_SHA:?set IMAGE_SHA to an immutable build sha}"
+case "$PLAYBOOK" in
+  monitor.yml)
+    : "${IMAGE_SHA:?set IMAGE_SHA to an immutable build sha}"
+    echo "deploying ref: $IMAGE_SHA"
+    ;;
+  grpc-bench.yml) ;;
+  *) echo "unknown PLAYBOOK: $PLAYBOOK (monitor.yml|grpc-bench.yml)" >&2; exit 1 ;;
+esac
 : "${MONITOR_DOPPLER_TOKEN:?VM Doppler service token, set via Doppler}"
 : "${KNOWN_HOSTS_B64:?base64 known_hosts covering every inventory host, set via Doppler}"
-
-echo "deploying ref: $IMAGE_SHA"
 
 materialize() {
   local var="$1" file="$SCRIPT_DIR/$2"
@@ -48,9 +56,11 @@ if [ -n "$GRPC_BENCH_REF" ]; then
 fi
 
 cd "$SCRIPT_DIR"
-ansible-playbook site.yml \
+ansible-playbook "$PLAYBOOK" \
   ${LIMIT:+--limit "$LIMIT"} \
   --extra-vars "@${VARS_FILE}"
+
+[ "$PLAYBOOK" = grpc-bench.yml ] || exit 0
 
 # Publish the benchmark dashboards at the same ref the hosts now run, so panels
 # never expect a schema the subscribers aren't writing yet. They query the

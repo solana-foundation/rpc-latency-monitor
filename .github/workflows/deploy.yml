@@ -153,23 +153,23 @@ jobs:
             --data "$PAYLOAD" "$SLACK_WEBHOOK"
 
       - name: Deploy (terraform + ansible dispatch)
+        id: rpc
         env:
           DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN }}
           IMAGE_SHA: ${{ steps.image.outputs.sha }}
           PROJECT: ${{ vars.GCP_PROJECT_ID }}
           GCP_TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
           AWS_TF_STATE_BUCKET: ${{ vars.AWS_TF_STATE_BUCKET }}
-          GRPC_BENCH_REF: ${{ github.event.inputs.grpc_bench_ref || '' }}
         run: |
           set -euo pipefail
           doppler run --project "$DOPPLER_PROJECT" --config "$DOPPLER_CONFIG" -- \
-            env PROVIDER="$PROVIDER" IMAGE_SHA="$IMAGE_SHA" TARGET="$TARGET" GRPC_BENCH_REF="$GRPC_BENCH_REF" \
+            env PROVIDER="$PROVIDER" IMAGE_SHA="$IMAGE_SHA" TARGET="$TARGET" \
                 PROJECT="$PROJECT" REGION="$REGION" \
                 GCP_TF_STATE_BUCKET="$GCP_TF_STATE_BUCKET" AWS_TF_STATE_BUCKET="$AWS_TF_STATE_BUCKET" \
             ./deploy/deploy.sh
 
       - name: Notify Slack — deploy succeeded
-        if: success() && env.SLACK_WEBHOOK != ''
+        if: ${{ !cancelled() && steps.rpc.outcome == 'success' && env.SLACK_WEBHOOK != '' }}
         env:
           SUMMARY_FIELDS: ${{ steps.summary.outputs.fields }}
         run: |
@@ -193,7 +193,7 @@ jobs:
             --data "$PAYLOAD" "$SLACK_WEBHOOK"
 
       - name: Notify Slack — deploy failed
-        if: failure() && env.SLACK_WEBHOOK != ''
+        if: ${{ !cancelled() && (steps.rpc.outcome == 'failure' || (failure() && steps.rpc.outcome == 'skipped')) && env.SLACK_WEBHOOK != '' }}
         env:
           SUMMARY_FIELDS: ${{ steps.summary.outputs.fields }}
         run: |
@@ -215,3 +215,112 @@ jobs:
             }')
           curl -sS --fail-with-body -X POST -H 'Content-Type: application/json' \
             --data "$PAYLOAD" "$SLACK_WEBHOOK"
+
+      # The gRPC benchmark rolls out as its own step with its own Slack
+      # messages, so it never shares a status with the RPC rollout above. It
+      # runs on manual dispatches that reach metal hosts, and on auto-deploys
+      # only when the merged commit touches the benchmark's deploy files.
+      - name: Resolve gRPC benchmark rollout
+        id: grpc
+        if: ${{ !cancelled() }}
+        env:
+          EVENT: ${{ github.event_name }}
+          INPUT_REF: ${{ github.event.inputs.grpc_bench_ref || '' }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+          ACTOR: ${{ github.event.workflow_run.actor.login || github.actor }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          GRAFANA_URL: ${{ vars.GRAFANA_API_URL }}
+        run: |
+          set -euo pipefail
+          DEFAULTS=deploy/ansible/roles/grpc_bench/defaults/main.yml
+          REF="${INPUT_REF:-$(sed -n 's/^grpc_bench_ref: "\([0-9a-f]*\)"$/\1/p' "$DEFAULTS")}"
+          RUN=false; WHY=""
+          case "$TARGET:$PROVIDER" in
+            all:all|fleet:all|all:latitude|fleet:latitude|all:tsw|fleet:tsw)
+              if [ -z "$REF" ]; then
+                WHY="no grpc_bench_ref pinned"
+              elif [ "$EVENT" = workflow_dispatch ]; then
+                RUN=true; WHY="manual dispatch"
+              elif ! git diff --quiet "${HEAD_SHA}^" "$HEAD_SHA" -- \
+                  deploy/ansible/roles/grpc_bench deploy/ansible/grpc-bench.yml deploy/ansible/group_vars; then
+                RUN=true; WHY="gRPC deploy files changed in ${HEAD_SHA:0:7}"
+              else
+                WHY="no gRPC deploy changes in ${HEAD_SHA:0:7}"
+              fi ;;
+            *) WHY="target/provider has no metal hosts" ;;
+          esac
+          echo "gRPC benchmark rollout: run=$RUN ($WHY)"
+          echo "run=$RUN" >> "$GITHUB_OUTPUT"
+          [ "$RUN" = true ] || exit 0
+
+          case "$PROVIDER" in all) METAL_HOSTS="latitude:tsw" ;; *) METAL_HOSTS="$PROVIDER" ;; esac
+          PROVIDERS=$(sed -n '/^grpc_bench_providers:/,/^$/s/^  - name: //p' "$DEFAULTS" | paste -sd, - | sed 's/,/, /g')
+          SUBJECT=$(curl -sS --fail "https://api.github.com/repos/solana-foundation/grpc-latency-monitor/commits/$REF" \
+            | jq -r '.commit.message | split("\n")[0]' | cut -c1-140) || SUBJECT=""
+          FIELDS=$(jq -n \
+            --arg ref "$REF" --arg subject "$SUBJECT" --arg hosts "${METAL_HOSTS/:/, }" \
+            --arg providers "$PROVIDERS" --arg why "$WHY" --arg actor "$ACTOR" \
+            --arg run_url "$RUN_URL" --arg run_id "${{ github.run_id }}" --arg grafana "$GRAFANA_URL" \
+            '[
+              {type:"mrkdwn",text:("*Benchmark:*\n<https://github.com/solana-foundation/grpc-latency-monitor/commit/"+$ref+"|`"+$ref[0:7]+"`> — "+$subject)},
+              {type:"mrkdwn",text:("*Hosts:*\n`"+$hosts+"`")},
+              {type:"mrkdwn",text:("*Providers:*\n"+$providers)},
+              {type:"mrkdwn",text:("*Why:*\n"+$why)},
+              {type:"mrkdwn",text:("*Triggered by:*\n"+$actor)},
+              {type:"mrkdwn",text:("*Run:*\n<"+$run_url+"|workflow #"+$run_id+">")}
+            ] + (if $grafana == "" then [] else
+              [{type:"mrkdwn",text:("*Dashboards:*\n<"+$grafana+"/d/solana-streaming-overview|Overview> · <"+$grafana+"/d/solana-streaming-head-to-head|Head to Head> · <"+$grafana+"/d/solana-streaming-benchmark|All Providers>")}] end)')
+          {
+            echo "ref=$REF"
+            echo "metal_hosts=$METAL_HOSTS"
+            echo 'fields<<JQ_FIELDS_EOF'
+            echo "$FIELDS"
+            echo 'JQ_FIELDS_EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Notify Slack — gRPC benchmark deploy started
+        if: ${{ !cancelled() && steps.grpc.outputs.run == 'true' && env.SLACK_WEBHOOK != '' }}
+        env:
+          FIELDS: ${{ steps.grpc.outputs.fields }}
+          REF: ${{ steps.grpc.outputs.ref }}
+        run: |
+          jq -n --arg marker "[STARTED] Deploy gRPC Benchmark" --arg ref "${REF:0:7}" --arg color "#36a64f" \
+            --argjson fields "$FIELDS" \
+            '{text: ("*"+$marker+"* — `"+$ref+"`"),
+              attachments: [{color: $color, blocks: [
+                {type:"section", text:{type:"mrkdwn", text:("*"+$marker+"*")}},
+                {type:"section", fields:$fields}]}]}' \
+          | curl -sS --fail-with-body -X POST -H 'Content-Type: application/json' --data @- "$SLACK_WEBHOOK"
+
+      - name: Deploy gRPC benchmark (metal)
+        id: grpc_deploy
+        if: ${{ !cancelled() && steps.grpc.outputs.run == 'true' }}
+        env:
+          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN }}
+          GRPC_BENCH_REF: ${{ steps.grpc.outputs.ref }}
+          METAL_HOSTS: ${{ steps.grpc.outputs.metal_hosts }}
+        run: |
+          set -euo pipefail
+          doppler run --project "$DOPPLER_PROJECT" --config "$DOPPLER_CONFIG" -- \
+            env PLAYBOOK=grpc-bench.yml LIMIT="$METAL_HOSTS" GRPC_BENCH_REF="$GRPC_BENCH_REF" \
+            ./deploy/ansible/deploy.sh
+
+      - name: Notify Slack — gRPC benchmark deploy finished
+        if: ${{ !cancelled() && steps.grpc.outputs.run == 'true' && steps.grpc_deploy.outcome != 'skipped' && env.SLACK_WEBHOOK != '' }}
+        env:
+          FIELDS: ${{ steps.grpc.outputs.fields }}
+          REF: ${{ steps.grpc.outputs.ref }}
+          OUTCOME: ${{ steps.grpc_deploy.outcome }}
+        run: |
+          if [ "$OUTCOME" = success ]; then
+            MARKER="[SUCCESS] Deploy gRPC Benchmark"; COLOR="#36a64f"
+          else
+            MARKER="[FAILED] Deploy gRPC Benchmark"; COLOR="#ff0000"
+          fi
+          jq -n --arg marker "$MARKER" --arg ref "${REF:0:7}" --arg color "$COLOR" \
+            --argjson fields "$FIELDS" \
+            '{text: ("*"+$marker+"* — `"+$ref+"`"),
+              attachments: [{color: $color, blocks: [
+                {type:"section", text:{type:"mrkdwn", text:("*"+$marker+"*")}},
+                {type:"section", fields:$fields}]}]}' \
+          | curl -sS --fail-with-body -X POST -H 'Content-Type: application/json' --data @- "$SLACK_WEBHOOK"

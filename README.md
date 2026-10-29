@@ -265,7 +265,10 @@ The bare-metal hosts also run the Yellowstone gRPC streaming benchmark from
 `grpc_bench_ref`). It compares Helius LaserStream (nearest region) and Triton, and writes
 to the `benchmark` database on the geyser FRA ClickHouse (`clickhouse.tradeonsolana.com`,
 user `benchmark_writer`). Grafana reads it through the `clickhouse-on-prem` datasource.
-Each deploy runs the benchmark's Goose migrations once before any subscriber starts.
+It rolls out separately from rpc-monitor (`deploy/ansible/grpc-bench.yml`, its own Deploy-workflow
+step and `Deploy gRPC Benchmark` Slack messages): on every manual dispatch that reaches metal
+hosts, and on auto-deploys only when the merged commit touches its deploy files. Each rollout runs
+the benchmark's Goose migrations once before any subscriber starts, then publishes its dashboards.
 Doppler keys: `GRPC_BENCH_CH_URL` / `_USER` / `_PASSWORD`, `HELIUS_API_KEY`, `TRITON_HOST`,
 `TRITON_TOKEN`, and optionally `GRPC_BENCH_REFERENCE_RPC_URL` (default: the public mainnet RPC).
 
