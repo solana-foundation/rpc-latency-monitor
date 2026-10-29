@@ -194,7 +194,8 @@
           {{ grpc_bench_ch_url | urlsplit('scheme') }}://{{
           grpc_bench_env.GRPC_BENCH_CH_USER | urlencode | replace('/', '%2F') }}:{{
           grpc_bench_env.GRPC_BENCH_CH_PASSWORD | urlencode | replace('/', '%2F') }}@{{
-          grpc_bench_ch_url | urlsplit('netloc') }}/{{ grpc_bench_ch_database }}
+          grpc_bench_ch_url | urlsplit('netloc') }}/{{ grpc_bench_ch_database }}{{
+          '?secure=true' if grpc_bench_ch_url is match('https://') else '' }}
       register: grpc_bench_goose
       changed_when: "'OK ' in grpc_bench_goose.stderr"
       no_log: true
