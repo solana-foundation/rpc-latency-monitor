@@ -96,7 +96,8 @@
   vars:
     host: "{{ grpc_bench_secrets[item.url_secret] | default('') if item.url_secret is defined else '' }}"
     url: "{{ item.url | default(('https://' ~ host) if host | length > 0 else '') }}"
-    token: "{{ grpc_bench_secrets[item.token_secret] | default('') if item.token_secret is defined else '' }}"
+    token_raw: "{{ grpc_bench_secrets[item.token_secret] | default('') if item.token_secret is defined else '' }}"
+    token: "{{ (token_raw | regex_search(item.token_pattern, '\\1') | default([''], true) | first) if item.token_pattern is defined else token_raw }}"
     entry:
       name: "{{ item.name }}"
       url: "{{ url }}"

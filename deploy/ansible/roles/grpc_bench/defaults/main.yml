@@ -26,7 +26,8 @@ grpc_bench_goose_bin: "/usr/local/bin/goose"
 grpc_bench_reference_rpc_url: "https://api.mainnet.solana.com"
 
 # Each provider needs a URL (`url`, or a bare host in Doppler `url_secret`) and
-# optionally an x-token Doppler key (`token_secret`). A provider whose secrets
+# optionally an x-token Doppler key (`token_secret`); `token_pattern` extracts
+# the token from that secret (first capture group). A provider whose secrets
 # are missing is skipped with a warning; at least two must resolve.
 # Each provider opens 5 gRPC connections per host.
 grpc_bench_providers:
@@ -36,6 +37,11 @@ grpc_bench_providers:
   - name: triton
     url_secret: TRITON_HOST
     token_secret: TRITON_TOKEN
+  # Global endpoint; the x-token is the API key from the RPC URL's /v2/<key>.
+  - name: alchemy
+    url: "https://solana-mainnet.streaming.alchemy.com"
+    token_secret: ALCHEMY_URL
+    token_pattern: "/v2/([^/?#]+)"
 
 # Nearest Helius LaserStream region per monitor_region.
 grpc_bench_helius_regions:
