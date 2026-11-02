@@ -27,8 +27,10 @@ grpc_bench_reference_rpc_url: "https://api.mainnet.solana.com"
 
 # Each provider needs a URL (`url`, or a bare host in Doppler `url_secret`) and
 # optionally an x-token Doppler key (`token_secret`); `token_pattern` extracts
-# the token from that secret (first capture group). A provider whose secrets
-# are missing is skipped with a warning; at least two must resolve.
+# the token from that secret (first capture group). `url_pattern` likewise
+# extracts the host from `url_secret`, and `port` is appended to it. A
+# provider whose secrets are missing is skipped with a warning; at least two
+# must resolve.
 # Each provider opens 5 gRPC connections per host.
 grpc_bench_providers:
   - name: helius
@@ -42,6 +44,14 @@ grpc_bench_providers:
     url: "https://solana-mainnet.streaming.alchemy.com"
     token_secret: ALCHEMY_URL
     token_pattern: "/v2/([^/?#]+)"
+  # Yellowstone on the RPC endpoint's host at :10000; the x-token is the path
+  # token from QUICKNODE_URL (https://<name>.solana-mainnet.quiknode.pro/<token>/).
+  - name: quicknode
+    url_secret: QUICKNODE_URL
+    url_pattern: "^https?://([^/?#]+)"
+    port: 10000
+    token_secret: QUICKNODE_URL
+    token_pattern: "^https?://[^/]+/([^/?#]+)"
 
 # Nearest Helius LaserStream region per monitor_region.
 grpc_bench_helius_regions:

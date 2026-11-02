@@ -262,7 +262,7 @@ Each container exports Prometheus metrics that are scraped locally and forwarded
 The bare-metal hosts also run the Yellowstone gRPC streaming benchmark from
 [grpc-latency-monitor](https://github.com/solana-foundation/grpc-latency-monitor) as a
 `grpc-bench` systemd unit beside `rpc-monitor` (ansible role `grpc_bench`, pinned by
-`grpc_bench_ref`). It compares Helius LaserStream (nearest region), Triton and Alchemy, and writes
+`grpc_bench_ref`). It compares Helius LaserStream (nearest region), Triton, Alchemy and QuickNode, and writes
 to the `benchmark` database on the geyser FRA ClickHouse (`clickhouse.tradeonsolana.com`,
 user `benchmark_writer`). Grafana reads it through the `benchmark-clickhouse` datasource (same host, `grafana_readonly`, default database `benchmark`).
 It rolls out separately from rpc-monitor (`deploy/ansible/grpc-bench.yml`, its own Deploy-workflow
@@ -272,7 +272,7 @@ the benchmark's Goose migrations once before any subscriber starts, then publish
 dashboards to their own `grpc-latency` folder on solanafoundation.grafana.net (only that stack;
 override with `GRPC_BENCH_GRAFANA_FOLDER_UID`).
 Doppler keys: `GRPC_BENCH_CH_URL` / `_USER` / `_PASSWORD`, `HELIUS_API_KEY`, `TRITON_HOST`,
-`TRITON_TOKEN`, `ALCHEMY_URL` (its `/v2/<key>` is the gRPC x-token), and optionally `GRPC_BENCH_REFERENCE_RPC_URL` (default: the public mainnet RPC).
+`TRITON_TOKEN`, `ALCHEMY_URL` (its `/v2/<key>` is the gRPC x-token), `QUICKNODE_URL` (gRPC on its host at `:10000`, path token as x-token), and optionally `GRPC_BENCH_REFERENCE_RPC_URL` (default: the public mainnet RPC).
 
 ## Dashboards
 
