@@ -271,8 +271,8 @@ hosts, and on auto-deploys only when the merged commit touches its deploy files.
 the benchmark's Goose migrations once before any subscriber starts, then publishes its three
 dashboards to their own `grpc-latency` folder on solanafoundation.grafana.net (only that stack;
 override with `GRPC_BENCH_GRAFANA_FOLDER_UID`).
-Doppler keys: `GRPC_BENCH_CH_URL` / `_USER` / `_PASSWORD`, `HELIUS_API_KEY`, `TRITON_HOST`,
-`TRITON_TOKEN`, `ALCHEMY_URL` (its `/v2/<key>` is the gRPC x-token), `QUICKNODE_URL` (gRPC on its host at `:10000`, path token as x-token), and optionally `GRPC_BENCH_REFERENCE_RPC_URL` (default: the public mainnet RPC).
+Doppler keys: `GRPC_BENCH_CH_URL` / `_USER` / `_PASSWORD`, `HELIUS_API_KEY`,
+`TRITON_TOKEN` (used against Triton's Riptide endpoint, `riptide.rpcpool.com`), `ALCHEMY_URL` (its `/v2/<key>` is the gRPC x-token), `QUICKNODE_URL` (gRPC on its host at `:443`, path token as x-token), and optionally `GRPC_BENCH_REFERENCE_RPC_URL` (default: the public mainnet RPC).
 
 ## Dashboards
 

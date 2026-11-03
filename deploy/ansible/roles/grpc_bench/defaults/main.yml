@@ -36,20 +36,22 @@ grpc_bench_providers:
   - name: helius
     url: "{{ 'https://laserstream-mainnet-' ~ grpc_bench_helius_regions[monitor_region] ~ '.helius-rpc.com' if monitor_region in grpc_bench_helius_regions else '' }}"
     token_secret: HELIUS_API_KEY
+  # Riptide, Triton's gRPC endpoint (global); TRITON_HOST stays rpc-monitor's
+  # RPC host.
   - name: triton
-    url_secret: TRITON_HOST
+    url: "https://riptide.rpcpool.com"
     token_secret: TRITON_TOKEN
   # Global endpoint; the x-token is the API key from the RPC URL's /v2/<key>.
   - name: alchemy
     url: "https://solana-mainnet.streaming.alchemy.com"
     token_secret: ALCHEMY_URL
     token_pattern: "/v2/([^/?#]+)"
-  # Yellowstone on the RPC endpoint's host at :10000; the x-token is the path
-  # token from QUICKNODE_URL (https://<name>.solana-mainnet.quiknode.pro/<token>/).
+  # Yellowstone on the RPC endpoint's host at :443 (QuickNode calls :10000
+  # legacy); the x-token is the path token from QUICKNODE_URL
+  # (https://<name>.solana-mainnet.quiknode.pro/<token>/).
   - name: quicknode
     url_secret: QUICKNODE_URL
     url_pattern: "^https?://([^/?#]+)"
-    port: 10000
     token_secret: QUICKNODE_URL
     token_pattern: "^https?://[^/]+/([^/?#]+)"
 
