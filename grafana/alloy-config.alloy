@@ -7,7 +7,13 @@ prometheus.scrape "rpc_latency_monitor" {
 }
 
 prometheus.remote_write "grafana_cloud" {
-  external_labels = { infra = coalesce(sys.env("MONITOR_INFRA"), "gcp") }
+  // `host` keeps two boxes that share a region (e.g. a hand-made stand-in
+  // beside the terraform one) from writing identical series, which makes
+  // rate() see a counter reset on every interleaved sample.
+  external_labels = {
+    infra = coalesce(sys.env("MONITOR_INFRA"), "gcp"),
+    host  = coalesce(sys.env("MONITOR_HOST"), "unknown")
+  }
 
   endpoint {
     url = sys.env("GRAFANA_CLOUD_PROM_URL")

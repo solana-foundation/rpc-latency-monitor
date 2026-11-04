@@ -17,7 +17,7 @@ docker run -d --name rpc-monitor --network host --restart always \
   "$IMAGE" --config /conf/config.yaml
 
 docker run -d --name alloy --network host --restart always \
-  -e MONITOR_INFRA="$INFRA" \
+  -e MONITOR_INFRA="$INFRA" -e MONITOR_HOST="$(hostname)" \
   --env-file "$ENV_FILE" \
   -v "$CONF_DIR":/conf:ro \
   grafana/alloy:v1.17.1 run /conf/config.alloy
