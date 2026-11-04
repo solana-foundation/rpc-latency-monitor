@@ -80,14 +80,17 @@ deploy_fleet() {
   # Reset only the instances terraform manages (name => zone). Selecting by the
   # service label used to pick up hand-made boxes too, which then got re-pulled
   # on every deploy while emitting the same series as the real region box.
-  local managed strays
+  local managed labeled strays
   managed="$(terraform -chdir="$TF_DIR" output -json monitor_instances |
     jq -r 'to_entries[] | "\(.key) \(.value)"')"
-  strays="$(gcloud compute instances list --project "$PROJECT" \
-    --filter="labels.service=rpc-latency-monitor" --format="value(name)" |
-    grep -vxF -f <(cut -d' ' -f1 <<<"$managed") || true)"
+  # Fail loudly if the list itself cannot be fetched; only "no strays" may be empty.
+  labeled="$(gcloud compute instances list --project "$PROJECT" \
+    --filter="labels.service=rpc-latency-monitor" --format="value(name,zone.basename())" |
+    tr '\t' ' ')"
+  # Compare "name zone" pairs: with zonal DNS an unmanaged box may reuse a managed name.
+  strays="$(grep -vxF -f <(printf '%s\n' "$managed") <<<"$labeled" || true)"
   if [ -n "$strays" ]; then
-    echo "::warning::instances labeled service=rpc-latency-monitor but not in terraform (left untouched): $(tr '\n' ' ' <<<"$strays")" >&2
+    echo "::warning::instances labeled service=rpc-latency-monitor but not in terraform (left untouched): $(paste -sd ';' - <<<"$strays")" >&2
   fi
 
   RESET_DELAY="${RESET_DELAY:-75}"
