@@ -232,6 +232,75 @@ mod tests {
     }
 
     #[test]
+    fn signature_history_errors_do_not_affect_recent_series() {
+        let metrics = Metrics::new("test", "eu-central").unwrap();
+        let method = RpcMethod::GetSignaturesForAddressRecent;
+        metrics.record_call(
+            "provider",
+            method,
+            &result(CallStatus::Success),
+            CallStatus::Success,
+            "",
+        );
+        let errors = [
+            ErrorKind::RpcError(-32017),
+            ErrorKind::Timeout,
+            ErrorKind::Empty,
+        ];
+        for error in errors {
+            let status = CallStatus::Error(error);
+            let mut response = result(status);
+            response.observed_slot = None;
+            metrics.record_call(
+                "provider",
+                RpcMethod::GetSignaturesForAddressArchival,
+                &response,
+                status,
+                "archival",
+            );
+        }
+        metrics.record_slot_lag("provider", method, 3);
+        metrics.record_claim_check("provider", method, "", "match");
+
+        let output = metrics.encode().unwrap();
+        for metric in ["rpc_requests_total{", "rpc_latency_seconds_count{"] {
+            let recent: Vec<_> = output
+                .lines()
+                .filter(|line| {
+                    line.starts_with(metric)
+                        && line.contains("method=\"getSignaturesForAddress_recent\"")
+                })
+                .collect();
+            assert_eq!(recent.len(), 1);
+            assert!(recent[0].contains("status=\"success\""));
+            assert!(recent[0].contains("target=\"\""));
+            assert!(recent[0].ends_with(" 1"));
+
+            let archival_count: f64 = output
+                .lines()
+                .filter(|line| {
+                    line.starts_with(metric)
+                        && line.contains("method=\"getSignaturesForAddress_archival\"")
+                })
+                .map(|line| {
+                    assert!(line.contains("status=\"error\""));
+                    assert!(line.contains("target=\"archival\""));
+                    line.rsplit_once(' ').unwrap().1.parse::<f64>().unwrap()
+                })
+                .sum();
+            assert_eq!(archival_count, 3.0);
+        }
+        for metric in ["rpc_slot_lag{", "rpc_claim_check_total{"] {
+            let line = output
+                .lines()
+                .find(|line| line.starts_with(metric))
+                .unwrap();
+            assert!(line.contains("method=\"getSignaturesForAddress_recent\""));
+        }
+        assert!(!output.contains("method=\"getSignaturesForAddress\""));
+    }
+
+    #[test]
     fn skipped_slot_keeps_the_provider_up() {
         let metrics = Metrics::new("test", "us-east").unwrap();
         metrics.record_call(

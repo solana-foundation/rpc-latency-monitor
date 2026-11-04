@@ -164,7 +164,11 @@ to either the config value or the raw JSON-RPC name:
 | `get_block_recent` | `getBlock` | `getBlock_recent` | A recent block a fixed depth behind the tip, **`transactionDetails: full`** (a real block fetch); also seeds the live account pool. |
 | `get_block_archival` | `getBlock` | `getBlock_archival` | A full block ~40M slots back, retained only by archival nodes (non-archival tiers correctly error). Driven by the coordinated archival round (below), not a per-provider loop: every provider is asked the **same random, never-repeated** old slot so latency is comparable and blockhashes can be cross-checked. |
 | `get_transaction_recent` | `getTransaction` | `getTransaction_recent` | A signature freshly discovered by `get_signatures_for_address`. |
-| `get_signatures_for_address` | `getSignaturesForAddress` | `getSignaturesForAddress` | A permanently busy address at `confirmed`, `limit` 1000 (a full page, not just the head). The head signature's slot is the response's observed slot, so a cached page scores `stale`. |
+| `get_signatures_for_address_recent` | `getSignaturesForAddress` | `getSignaturesForAddress_recent` | A permanently busy address at `confirmed`, `limit` 1000 (a full page, not just the head). The head signature's slot is the response's observed slot, so a cached page scores `stale`. |
+| `get_signatures_for_address_archival` | `getSignaturesForAddress` | `getSignaturesForAddress_archival` | Pages the same address with `before` set to a majority-verified archival signature. Eligible alternate cycles use a new anchor; otherwise the probe remains recent. |
+
+`get_signatures_for_address` remains an alias for `get_signatures_for_address_recent`.
+The recent check owns the archival rotation, as before.
 
 ### Regions
 
