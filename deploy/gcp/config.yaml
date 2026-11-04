@@ -54,6 +54,42 @@ providers:
   - name: solanavibestation
     url: "https://elite.rpc.solanavibestation.com/?api_key=${SOLANAVIBESTATION_API_KEY}"
     geos: [us-east, us-west, eu-central, eu-west]
+  - name: erpc
+    url: "https://edge.erpc.global/?api-key=${ERPC_API_KEY}"
+  - name: erpc-unlimited
+    url: "${ERPC_UNLIMITED_FRA_URL}"
+    # Region-fixed Unlimited endpoints: one per city we run nodes in
+    # (Tokyo, New York, London, Amsterdam, Frankfurt, Singapore). No node in
+    # US West, so that geo is left out rather than measured through anycast.
+    geos: [us-east, eu-central, eu-west, ap-northeast, ap-southeast]
+    region_urls:
+      us-east4: "${ERPC_UNLIMITED_NYC_URL}"
+      us-east-1: "${ERPC_UNLIMITED_NYC_URL}"
+      nyc: "${ERPC_UNLIMITED_NYC_URL}"
+      ewr: "${ERPC_UNLIMITED_NYC_URL}"
+      ewr2: "${ERPC_UNLIMITED_NYC_URL}"
+      pit: "${ERPC_UNLIMITED_NYC_URL}"
+      pit1: "${ERPC_UNLIMITED_NYC_URL}"
+      europe-west3: "${ERPC_UNLIMITED_FRA_URL}"
+      eu-central-1: "${ERPC_UNLIMITED_FRA_URL}"
+      fra: "${ERPC_UNLIMITED_FRA_URL}"
+      fra2: "${ERPC_UNLIMITED_FRA_URL}"
+      europe-west4: "${ERPC_UNLIMITED_AMS_URL}"
+      ams: "${ERPC_UNLIMITED_AMS_URL}"
+      ams3: "${ERPC_UNLIMITED_AMS_URL}"
+      europe-west2: "${ERPC_UNLIMITED_LON_URL}"
+      eu-west-2: "${ERPC_UNLIMITED_LON_URL}"
+      eu-west-1: "${ERPC_UNLIMITED_LON_URL}"
+      lon: "${ERPC_UNLIMITED_LON_URL}"
+      lon1: "${ERPC_UNLIMITED_LON_URL}"
+      asia-northeast1: "${ERPC_UNLIMITED_TYO_URL}"
+      ap-northeast-1: "${ERPC_UNLIMITED_TYO_URL}"
+      tyo: "${ERPC_UNLIMITED_TYO_URL}"
+      tyo2: "${ERPC_UNLIMITED_TYO_URL}"
+      asia-southeast1: "${ERPC_UNLIMITED_SGP_URL}"
+      ap-southeast-1: "${ERPC_UNLIMITED_SGP_URL}"
+      sgp: "${ERPC_UNLIMITED_SGP_URL}"
+      sgp2: "${ERPC_UNLIMITED_SGP_URL}"
 
 checks:
   - method: get_health

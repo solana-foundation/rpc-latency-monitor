@@ -139,6 +139,10 @@ providers:
     url: "${QUICKNODE_URL}"
   - name: chainstack
     url: "${CHAINSTACK_URL}"
+  - name: erpc
+    url: "https://edge.erpc.global/?api-key=${ERPC_API_KEY}"
+  - name: erpc-unlimited
+    url: "${ERPC_UNLIMITED_FRA_URL}"
   - name: fluxrpc
     url: "https://cdn.fluxrpc.com?key=${FLUXRPC_KEY}"
   - name: solanavibestation
