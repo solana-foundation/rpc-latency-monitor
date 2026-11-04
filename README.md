@@ -258,6 +258,10 @@ providers); the original GCP fleet spans seven regions across North America, Eur
 | asia-southeast1 / ap-southeast-1 / sgp / sgp2 | Singapore (AP Southeast) | gcp, aws, latitude, tsw |
 
 Each container exports Prometheus metrics that are scraped locally and forwarded to Grafana Cloud.
+Alloy stamps every series with `infra` and `host` (the machine's hostname), so two boxes that
+report the same `region` never collide into one series. The GCP deploy resets exactly the
+instances in terraform's `monitor_instances` output; anything else carrying the
+`service=rpc-latency-monitor` label is reported as a warning and left alone.
 
 The bare-metal hosts also run the Yellowstone gRPC streaming benchmark from
 [grpc-latency-monitor](https://github.com/solana-foundation/grpc-latency-monitor) as a
