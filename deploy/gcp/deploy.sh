@@ -77,17 +77,31 @@ deploy_fleet() {
     terraform -chdir="$TF_DIR" apply -auto-approve -parallelism=1 \
       -var "project_id=${PROJECT}" -var "monitor_image=${image}"
 
+  # Reset only the instances terraform manages (name => zone). Selecting by the
+  # service label used to pick up hand-made boxes too, which then got re-pulled
+  # on every deploy while emitting the same series as the real region box.
+  local managed labeled strays
+  managed="$(terraform -chdir="$TF_DIR" output -json monitor_instances |
+    jq -r 'to_entries[] | "\(.key) \(.value)"')"
+  # Fail loudly if the list itself cannot be fetched; only "no strays" may be empty.
+  labeled="$(gcloud compute instances list --project "$PROJECT" \
+    --filter="labels.service=rpc-latency-monitor" --format="value(name,zone.basename())" |
+    tr '\t' ' ')"
+  # Compare "name zone" pairs: with zonal DNS an unmanaged box may reuse a managed name.
+  strays="$(grep -vxF -f <(printf '%s\n' "$managed") <<<"$labeled" || true)"
+  if [ -n "$strays" ]; then
+    echo "::warning::instances labeled service=rpc-latency-monitor but not in terraform (left untouched): $(paste -sd ';' - <<<"$strays")" >&2
+  fi
+
   RESET_DELAY="${RESET_DELAY:-75}"
   first=1
-  gcloud compute instances list --project "$PROJECT" \
-    --filter="labels.service=rpc-latency-monitor" --format="value(name,zone)" |
-    while read -r name zone; do
-      [ -z "$name" ] && continue
-      [ "$first" -eq 1 ] || sleep "$RESET_DELAY"
-      first=0
-      gcloud compute instances reset "$name" --project "$PROJECT" --zone "$zone"
-      echo "reset $name"
-    done
+  while read -r name zone; do
+    [ -z "$name" ] && continue
+    [ "$first" -eq 1 ] || sleep "$RESET_DELAY"
+    first=0
+    gcloud compute instances reset "$name" --project "$PROJECT" --zone "$zone"
+    echo "reset $name"
+  done <<<"$managed"
 }
 
 RAW_API_PATHS="src/raw_api.rs src/bin/raw-api.rs deploy/migrations Cargo.toml Cargo.lock deploy/Dockerfile"

@@ -9,6 +9,7 @@ User={{ run_user }}
 Group={{ run_user }}
 EnvironmentFile={{ env_file }}
 Environment=MONITOR_INFRA={{ monitor_infra }}
+Environment=MONITOR_HOST={{ inventory_hostname }}
 ExecStart={{ alloy_bin }} run {{ conf_dir }}/config.alloy --storage.path={{ data_dir }}/alloy
 Restart=always
 RestartSec=5s
