@@ -266,7 +266,8 @@ instances in terraform's `monitor_instances` output; anything else carrying the
 The bare-metal hosts also run the Yellowstone gRPC streaming benchmark from
 [grpc-latency-monitor](https://github.com/solana-foundation/grpc-latency-monitor) as a
 `grpc-bench` systemd unit beside `rpc-monitor` (ansible role `grpc_bench`, pinned by
-`grpc_bench_ref`). It compares Helius LaserStream (nearest region), Triton and Alchemy, and writes
+`grpc_bench_ref`). It compares Helius LaserStream (nearest region), Triton and Alchemy on
+successful transactions only (`grpc_bench_filters.transactions_failed: false`), and writes
 to the `benchmark` database on the geyser FRA ClickHouse (`clickhouse.tradeonsolana.com`,
 user `benchmark_writer`). Grafana reads it through the `benchmark-clickhouse` datasource (same host, `grafana_readonly`, default database `benchmark`).
 It rolls out separately from rpc-monitor (`deploy/ansible/grpc-bench.yml`, its own Deploy-workflow
