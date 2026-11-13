@@ -1,6 +1,6 @@
 # Sender providers: adding yourself to the tip leaderboard
 
-`sender/tip-accounts.json` is the public registry mapping Solana tip accounts to
+`rpc-monitor/sender/tip-accounts.json` is the public registry mapping Solana tip accounts to
 the sender/landing provider that operates them. The sender leaderboard
 attributes a transaction's tip to your provider only when the tip lands on an
 address listed here — **unlisted addresses mean undercounted volume for you**.
@@ -68,7 +68,7 @@ expect this path to be slower than the signed one.
 - the file stays sorted by `(provider, address)` so diffs are reviewable
 
 Validator: [`scripts/validate_tip_accounts.py`](../scripts/validate_tip_accounts.py)
-— run it locally with `python scripts/validate_tip_accounts.py` before pushing.
+— run it locally with `python rpc-monitor/scripts/validate_tip_accounts.py rpc-monitor/sender/tip-accounts.json` before pushing.
 
 ## Removing addresses
 
