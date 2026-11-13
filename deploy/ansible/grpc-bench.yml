@@ -1,7 +1,9 @@
 # Rolled out separately from monitor.yml (own workflow step and Slack thread),
 # so a benchmark failure never strands or mislabels an rpc-monitor rollout.
+# TeraSwitch only: Latitude was turned off on 2026-11-13 to cut provider
+# usage (each host pulls ~0.75 TB/day per provider).
 - name: Deploy the Yellowstone gRPC benchmark beside rpc-monitor
-  hosts: tsw:latitude
+  hosts: tsw
   gather_facts: true
   roles:
     - grpc_bench

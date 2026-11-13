@@ -236,7 +236,7 @@ jobs:
           REF="${INPUT_REF:-$(sed -n 's/^grpc_bench_ref: "\([0-9a-f]*\)"$/\1/p' "$DEFAULTS")}"
           RUN=false; WHY=""
           case "$TARGET:$PROVIDER" in
-            all:all|fleet:all|all:latitude|fleet:latitude|all:tsw|fleet:tsw)
+            all:all|fleet:all|all:tsw|fleet:tsw)
               if [ -z "$REF" ]; then
                 WHY="no grpc_bench_ref pinned"
               elif [ "$EVENT" = workflow_dispatch ]; then
@@ -253,7 +253,7 @@ jobs:
           echo "run=$RUN" >> "$GITHUB_OUTPUT"
           [ "$RUN" = true ] || exit 0
 
-          case "$PROVIDER" in all) METAL_HOSTS="latitude:tsw" ;; *) METAL_HOSTS="$PROVIDER" ;; esac
+          METAL_HOSTS="tsw"  # benchmark runs on TeraSwitch only (grpc-bench.yml)
           PROVIDERS=$(sed -n '/^grpc_bench_providers:/,/^$/s/^  - name: //p' "$DEFAULTS" | paste -sd, - | sed 's/,/, /g')
           SUBJECT=$(curl -sS --fail "https://api.github.com/repos/solana-foundation/grpc-latency-monitor/commits/$REF" \
             | jq -r '.commit.message | split("\n")[0]' | cut -c1-140) || SUBJECT=""
