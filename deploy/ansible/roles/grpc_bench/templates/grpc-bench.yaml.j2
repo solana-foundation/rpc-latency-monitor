@@ -18,6 +18,9 @@ slot_confirmation_timeout: "30s"
 filters:
   accounts_owner: {{ grpc_bench_filters.accounts_owner | to_json }}
   transactions_account_include: {{ grpc_bench_filters.transactions_account_include | to_json }}
+{% if grpc_bench_filters.transactions_failed is not none %}
+  transactions_failed: {{ grpc_bench_filters.transactions_failed | to_json }}
+{% endif %}
 
 subscriber:
   region: {{ monitor_region | to_json }}
