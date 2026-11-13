@@ -1,6 +1,6 @@
 steps:
   - name: gcr.io/cloud-builders/docker
-    args: ["build", "-f", "deploy/Dockerfile", "-t", "${_IMAGE}", "."]
+    args: ["build", "-f", "rpc-monitor/deploy/Dockerfile", "-t", "${_IMAGE}", "."]
 images: ["${_IMAGE}"]
 timeout: 2400s
 options:

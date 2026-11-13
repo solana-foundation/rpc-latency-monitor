@@ -2,7 +2,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+MONITOR_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 TF_DIR="$SCRIPT_DIR/terraform"
 
 PROJECT="${PROJECT:?PROJECT=<gcp project id>}"
@@ -16,7 +16,7 @@ push_alerts() {
   echo "::add-mask::$GRAFANA_API_TOKEN" 2>/dev/null || true
   local ds_uid="${GRAFANA_DATASOURCE_UID:-grafanacloud-prom}"
   local folder_uid="${GRAFANA_FOLDER_UID:-}"
-  local f="$REPO_ROOT/grafana/alerts/monitor-data.json"
+  local f="$MONITOR_ROOT/grafana/alerts/monitor-data.json"
   local resolved group payload body code
   resolved="$(jq --arg ds "$ds_uid" --arg folder "$folder_uid" \
     'walk(if type=="string" then gsub("\\$\\{GRAFANA_DATASOURCE_UID\\}";$ds)|gsub("\\$\\{GRAFANA_FOLDER_UID\\}";$folder) else . end)' "$f")"
@@ -30,7 +30,7 @@ push_alerts() {
   [ "$code" -ge 200 ] && [ "$code" -lt 300 ] || { echo "alert upsert failed (HTTP $code): $body" >&2; exit 1; }
   echo "pushed alert group $group"
 
-  local route="$REPO_ROOT/grafana/alerts/notification-policies.json" tree live ns rt_url merged
+  local route="$MONITOR_ROOT/grafana/alerts/notification-policies.json" tree live ns rt_url merged
   tree="$(curl -sS -f "$GRAFANA_API_URL/api/v1/provisioning/policies" -H "Authorization: Bearer $GRAFANA_API_TOKEN")"
   live="$(jq -c --slurpfile ours "$route" '[.routes[]? | select(.object_matchers == $ours[0].object_matchers)] | first' <<<"$tree")"
   if [ "${GRAFANA_APPLY_POLICY_ROUTE:-}" != "1" ]; then
@@ -104,7 +104,8 @@ deploy_fleet() {
   done <<<"$managed"
 }
 
-RAW_API_PATHS="src/raw_api.rs src/bin/raw-api.rs deploy/migrations Cargo.toml Cargo.lock deploy/Dockerfile"
+# Relative to MONITOR_ROOT; Cargo.lock lives at the workspace root.
+RAW_API_PATHS="src/raw_api.rs src/bin/raw-api.rs deploy/migrations Cargo.toml ../Cargo.lock deploy/Dockerfile"
 
 deploy_raw_api() {
   : "${RAW_API_JWT_SECRET:?set via Doppler}"
@@ -125,7 +126,7 @@ deploy_raw_api() {
       && git cat-file -e "${deployed_sha}^{commit}" 2>/dev/null \
       && git cat-file -e "${IMAGE_SHA}^{commit}" 2>/dev/null; then
       # shellcheck disable=SC2086
-      if ! git diff --name-only "$deployed_sha" "$IMAGE_SHA" -- $RAW_API_PATHS | grep -q .; then
+      if ! git -C "$MONITOR_ROOT" diff --name-only "$deployed_sha" "$IMAGE_SHA" -- $RAW_API_PATHS | grep -q .; then
         echo "raw-api unchanged between $deployed_sha and $IMAGE_SHA — skipping (dispatch target=rawapi to force)"
         return 0
       fi

@@ -3,9 +3,9 @@ name: Validate tip-accounts registry
 on:
   pull_request:
     paths:
-      - 'sender/tip-accounts.json'
-      - 'sender/tip-accounts.schema.json'
-      - 'scripts/validate_tip_accounts.py'
+      - 'rpc-monitor/sender/tip-accounts.json'
+      - 'rpc-monitor/sender/tip-accounts.schema.json'
+      - 'rpc-monitor/scripts/validate_tip_accounts.py'
       - '.github/workflows/tip-accounts.yml'
 
 jobs:
@@ -20,6 +20,9 @@ jobs:
           python-version: '3.12'
       - run: pip install base58 pynacl
       - name: Fetch base registry
-        run: git show "origin/${{ github.base_ref }}:sender/tip-accounts.json" > /tmp/base-tip-accounts.json
+        # Falls back to the pre-monorepo path for bases that predate rpc-monitor/.
+        run: |
+          git show "origin/${{ github.base_ref }}:rpc-monitor/sender/tip-accounts.json" > /tmp/base-tip-accounts.json \
+            || git show "origin/${{ github.base_ref }}:sender/tip-accounts.json" > /tmp/base-tip-accounts.json
       - name: Validate
-        run: python scripts/validate_tip_accounts.py --base /tmp/base-tip-accounts.json sender/tip-accounts.json
+        run: python rpc-monitor/scripts/validate_tip_accounts.py --base /tmp/base-tip-accounts.json rpc-monitor/sender/tip-accounts.json

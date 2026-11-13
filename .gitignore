@@ -4,9 +4,9 @@
 Cargo.lock.orig
 
 # Local config & secrets — never commit real endpoints/keys
-/config.yaml
-/config.*.yaml
-!/config.example.yaml
+/rpc-monitor/config.yaml
+/rpc-monitor/config.*.yaml
+!/rpc-monitor/config.example.yaml
 .env
 .env.*
 !.env.example
@@ -19,8 +19,8 @@ Cargo.lock.orig
 !*.tfvars.example
 crash.log
 
-deploy/ansible/inventory/*.yml
-deploy/ansible/known_hosts
+rpc-monitor/deploy/ansible/inventory/*.yml
+rpc-monitor/deploy/ansible/known_hosts
 
 # Editor / OS
 .DS_Store

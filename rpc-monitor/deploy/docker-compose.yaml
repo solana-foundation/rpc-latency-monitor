@@ -1,8 +1,8 @@
 services:
   monitor:
     build:
-      context: ..
-      dockerfile: deploy/Dockerfile
+      context: ../..
+      dockerfile: rpc-monitor/deploy/Dockerfile
     command: ["--config", "/etc/rpc-latency-monitor/config.yaml"]
     environment:
       RUST_LOG: info
