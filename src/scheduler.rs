@@ -68,12 +68,18 @@ pub fn spawn_checks(
     }
 }
 
+/// Workers per provider runtime, so one large body read does not hold up that provider's other checks.
+const PROVIDER_RUNTIME_WORKERS: usize = 2;
+
 fn spawn_provider_runtime(provider: &str, tasks: Vec<CheckTask>) {
     let thread_name = format!("checks-{provider}");
+    let worker_name = thread_name.clone();
     std::thread::Builder::new()
         .name(thread_name.clone())
         .spawn(move || {
-            let runtime = tokio::runtime::Builder::new_current_thread()
+            let runtime = tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(PROVIDER_RUNTIME_WORKERS)
+                .thread_name(worker_name)
                 .enable_all()
                 .build()
                 .expect("provider check runtime");
