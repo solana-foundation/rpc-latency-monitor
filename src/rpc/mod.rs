@@ -293,8 +293,7 @@ impl RpcClient {
 
         let http_status = response.status();
         let endpoint_ip = response.remote_addr().map(|addr| addr.ip());
-        let body = response.bytes().await;
-        let latency = start.elapsed();
+        let (body, latency) = read_body(response, start).await;
 
         let parsed = match body {
             Ok(bytes) if bytes.len() >= LARGE_BODY_BYTES => {
@@ -345,6 +344,31 @@ impl Parsed {
             claim: None,
         }
     }
+}
+
+/// Reads the body chunk by chunk. The latency stops at the last chunk, before the chunks are joined.
+async fn read_body(
+    mut response: reqwest::Response,
+    start: Instant,
+) -> (reqwest::Result<Vec<u8>>, Duration) {
+    let mut chunks = Vec::new();
+    let mut len = 0;
+    loop {
+        match response.chunk().await {
+            Ok(Some(chunk)) => {
+                len += chunk.len();
+                chunks.push(chunk);
+            }
+            Ok(None) => break,
+            Err(error) => return (Err(error), start.elapsed()),
+        }
+    }
+    let latency = start.elapsed();
+    let mut body = Vec::with_capacity(len);
+    for chunk in &chunks {
+        body.extend_from_slice(chunk);
+    }
+    (Ok(body), latency)
 }
 
 const SLOT_SKIPPED: i64 = -32007;
@@ -644,5 +668,37 @@ mod tests {
             CallStatus::Error(ErrorKind::Timeout).error_kind(),
             Some("timeout")
         );
+    }
+
+    #[tokio::test]
+    async fn read_body_joins_chunks_in_order() {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = Vec::new();
+            let mut buf = [0u8; 1024];
+            while !request.windows(4).any(|w| w == b"\r\n\r\n") {
+                let n = stream.read(&mut buf).unwrap();
+                request.extend_from_slice(&buf[..n]);
+            }
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\ntransfer-encoding: chunked\r\n\r\n")
+                .unwrap();
+            for part in ["ab", "cd", "ef"] {
+                write!(stream, "{:x}\r\n{part}\r\n", part.len()).unwrap();
+                stream.flush().unwrap();
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            stream.write_all(b"0\r\n\r\n").unwrap();
+        });
+        let http = reqwest::Client::builder().no_proxy().build().unwrap();
+        let start = Instant::now();
+        let response = http.get(format!("http://{addr}/")).send().await.unwrap();
+        let (body, latency) = read_body(response, start).await;
+        assert_eq!(body.unwrap(), b"abcdef");
+        assert!(latency >= Duration::from_millis(10));
+        assert!(latency <= start.elapsed());
     }
 }
