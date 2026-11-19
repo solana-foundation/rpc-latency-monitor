@@ -146,7 +146,7 @@ providers:
 
 # Read checks to run against every provider. Each runs on its own loop.
 # `interval` is the period. Each provider+method fires at its own slot inside it
-# (hash of hostname, provider and method); `jitter` adds up to that much random delay.
+# (hash of hostname, provider, method and hour); `jitter` adds up to that much random delay.
 checks:
   - method: get_health
     interval: "5s"

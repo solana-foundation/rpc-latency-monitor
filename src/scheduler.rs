@@ -30,7 +30,7 @@ pub fn spawn_checks(
     archival_anchor: ArchivalAnchor,
 ) {
     let shared = SharedState::default();
-    let seed = host_seed();
+    let seed: Arc<str> = host_seed().into();
     let gpa_targets = Arc::new(gpa_targets);
     let derived_gpa = DerivedTargets::default();
     if let Some(config) = gpa_derive {
@@ -51,7 +51,7 @@ pub fn spawn_checks(
                 )
             })
             .map(|check| CheckTask {
-                phase: slot_phase(&seed, &endpoint.name, check.method, check.interval),
+                host_seed: seed.clone(),
                 provider: endpoint.name.clone(),
                 url: endpoint.url.clone(),
                 check: check.clone(),
@@ -91,7 +91,7 @@ fn spawn_provider_runtime(provider: &str, tasks: Vec<CheckTask>) {
 }
 
 struct CheckTask {
-    phase: Duration,
+    host_seed: Arc<str>,
     provider: String,
     url: String,
     check: CheckConfig,
@@ -114,7 +114,7 @@ impl CheckTask {
         let mut rotation = 0usize;
         let mut used_anchor: Option<String> = None;
         let interval = self.check.interval.as_millis() as u64;
-        let phase = self.phase.as_millis() as u64;
+        let phase = |epoch| self.phase(interval, epoch);
         let mut slot = next_slot_after(unix_millis(), interval, phase);
         loop {
             sleep_until_unix_millis(slot + self.jitter_millis()).await;
@@ -155,11 +155,7 @@ impl CheckTask {
                 };
                 self.record(&result, target);
             }
-            slot += interval;
-            let now = unix_millis();
-            if slot <= now {
-                slot = next_slot_after(now, interval, phase);
-            }
+            slot = next_slot_after(slot.max(unix_millis()), interval, phase);
         }
     }
 
@@ -207,6 +203,16 @@ impl CheckTask {
             )
     }
 
+    fn phase(&self, interval: u64, epoch: u64) -> u64 {
+        slot_phase(
+            &self.host_seed,
+            &self.provider,
+            self.check.method,
+            interval,
+            epoch,
+        )
+    }
+
     fn jitter_millis(&self) -> u64 {
         let jitter = self.check.jitter.as_millis() as u64;
         if jitter == 0 {
@@ -225,27 +231,40 @@ fn host_seed() -> String {
         .unwrap_or_default()
 }
 
-/// Offset of a provider+method inside its interval; stable across restarts.
-fn slot_phase(seed: &str, provider: &str, method: RpcMethod, interval: Duration) -> Duration {
-    let interval = interval.as_millis() as u64;
-    if interval == 0 {
-        return Duration::ZERO;
-    }
-    let digest = Sha256::digest(format!("{seed}|{provider}|{}", method.label()));
-    let hash = u64::from_le_bytes(digest[..8].try_into().expect("sha256 is 32 bytes"));
-    Duration::from_millis(hash % interval)
+const SLOT_EPOCH_MILLIS: u64 = 3_600_000;
+
+/// Slots move once per epoch: the smallest whole number of intervals that covers one hour.
+fn epoch_millis(interval: u64) -> u64 {
+    interval * SLOT_EPOCH_MILLIS.div_ceil(interval)
 }
 
-/// First wall-clock time after `now` that is `phase` past a multiple of `interval`.
-fn next_slot_after(now: u64, interval: u64, phase: u64) -> u64 {
+/// Offset of a provider+method inside its interval for one epoch; the same after a restart.
+fn slot_phase(seed: &str, provider: &str, method: RpcMethod, interval: u64, epoch: u64) -> u64 {
+    if interval == 0 {
+        return 0;
+    }
+    let digest = Sha256::digest(format!("{seed}|{provider}|{}|{epoch}", method.label()));
+    let hash = u64::from_le_bytes(digest[..8].try_into().expect("sha256 is 32 bytes"));
+    hash % interval
+}
+
+/// First slot after `now`. Each epoch places its slots at its own phase plus whole intervals.
+fn next_slot_after(now: u64, interval: u64, phase: impl Fn(u64) -> u64) -> u64 {
     if interval == 0 {
         return now;
     }
-    let base = now - now % interval + phase % interval;
-    if base > now {
-        base
+    let len = epoch_millis(interval);
+    let epoch = now / len;
+    let start = epoch * len + phase(epoch) % interval;
+    let slot = if now < start {
+        start
     } else {
-        base + interval
+        start + ((now - start) / interval + 1) * interval
+    };
+    if slot < (epoch + 1) * len {
+        slot
+    } else {
+        (epoch + 1) * len + phase(epoch + 1) % interval
     }
 }
 
@@ -427,37 +446,46 @@ mod tests {
 
     #[test]
     fn next_slot_is_the_first_phase_point_after_now() {
-        assert_eq!(next_slot_after(0, 60_000, 7_000), 7_000);
-        assert_eq!(next_slot_after(7_000, 60_000, 7_000), 67_000);
-        assert_eq!(next_slot_after(66_999, 60_000, 7_000), 67_000);
-        assert_eq!(next_slot_after(120_001, 60_000, 0), 180_000);
-        assert_eq!(next_slot_after(5, 0, 3), 5);
+        let fixed = |_| 7_000;
+        assert_eq!(next_slot_after(0, 60_000, fixed), 7_000);
+        assert_eq!(next_slot_after(7_000, 60_000, fixed), 67_000);
+        assert_eq!(next_slot_after(66_999, 60_000, fixed), 67_000);
+        assert_eq!(next_slot_after(120_001, 60_000, |_| 0), 180_000);
+        assert_eq!(next_slot_after(5, 0, |_| 3), 5);
     }
 
     #[test]
-    fn slot_phase_is_stable_and_inside_the_interval() {
-        let interval = Duration::from_secs(60);
-        let a = slot_phase("host", "alpha", RpcMethod::GetProgramAccounts, interval);
-        assert_eq!(
-            a,
-            slot_phase("host", "alpha", RpcMethod::GetProgramAccounts, interval)
-        );
-        assert!(a < interval);
-        assert_eq!(
-            slot_phase("host", "alpha", RpcMethod::GetSlot, Duration::ZERO),
-            Duration::ZERO
-        );
+    fn next_slot_takes_the_new_phase_at_the_epoch_boundary() {
+        let hour = 3_600_000;
+        let phase = |epoch| if epoch == 0 { 50_000 } else { 10_000 };
+        assert_eq!(next_slot_after(hour - 60_000, 60_000, phase), hour - 10_000);
+        assert_eq!(next_slot_after(hour - 10_000, 60_000, phase), hour + 10_000);
+        assert_eq!(next_slot_after(hour + 10_000, 60_000, phase), hour + 70_000);
+        assert_eq!(epoch_millis(60_000), hour);
+        assert_eq!(epoch_millis(7_000), 3_605_000);
+    }
+
+    #[test]
+    fn slot_phase_is_stable_inside_an_epoch_and_moves_between_epochs() {
+        let method = RpcMethod::GetProgramAccounts;
+        let a = slot_phase("host", "alpha", method, 60_000, 7);
+        assert_eq!(a, slot_phase("host", "alpha", method, 60_000, 7));
+        assert!(a < 60_000);
+        let mut by_epoch: Vec<u64> = (0..24)
+            .map(|epoch| slot_phase("host", "alpha", method, 60_000, epoch))
+            .collect();
+        by_epoch.sort_unstable();
+        by_epoch.dedup();
+        assert!(by_epoch.len() > 12);
+        assert_eq!(slot_phase("host", "alpha", RpcMethod::GetSlot, 0, 7), 0);
     }
 
     #[test]
     fn slot_phases_spread_providers_across_the_interval() {
-        let interval = Duration::from_secs(60);
         let providers = ["p0", "p1", "p2", "p3", "p4", "p5", "p6"];
         let mut phases: Vec<u64> = providers
             .iter()
-            .map(|p| {
-                slot_phase("host", p, RpcMethod::GetProgramAccounts, interval).as_millis() as u64
-            })
+            .map(|p| slot_phase("host", p, RpcMethod::GetProgramAccounts, 60_000, 0))
             .collect();
         phases.sort_unstable();
         phases.dedup();
@@ -465,9 +493,7 @@ mod tests {
         assert!(phases.last().unwrap() - phases.first().unwrap() > 10_000);
         let other_host: Vec<u64> = providers
             .iter()
-            .map(|p| {
-                slot_phase("other", p, RpcMethod::GetProgramAccounts, interval).as_millis() as u64
-            })
+            .map(|p| slot_phase("other", p, RpcMethod::GetProgramAccounts, 60_000, 0))
             .collect();
         assert_ne!(phases, {
             let mut o = other_host.clone();
