@@ -87,13 +87,13 @@ async fn main() -> anyhow::Result<()> {
         config.reference_check.clone(),
         config.claim_checks,
     );
-    let archival_client = Arc::new(RpcClient::new(config.archival_timeout)?);
     reference_check::spawn_archival_check(
         &endpoints,
-        archival_client,
+        client.clone(),
         metrics.clone(),
         reference,
         config.archival_interval,
+        config.archival_timeout,
         archival_anchor,
     );
 

@@ -113,6 +113,7 @@ pub fn spawn_archival_check(
     metrics: Metrics,
     reference: ReferenceSlot,
     interval: Duration,
+    timeout: Duration,
     anchor: ArchivalAnchor,
 ) {
     let providers: Vec<ProviderEndpoint> = endpoints.to_vec();
@@ -124,7 +125,7 @@ pub fn spawn_archival_check(
         loop {
             sleep(interval).await;
             run_archival_round(
-                &client, &providers, &metrics, &reference, &mut used, &anchor,
+                &client, &providers, &metrics, &reference, &mut used, &anchor, timeout,
             )
             .await;
         }
@@ -138,6 +139,7 @@ async fn run_archival_round(
     reference: &ReferenceSlot,
     used: &mut UsedSlots,
     anchor: &ArchivalAnchor,
+    timeout: Duration,
 ) {
     let Some(tip) = reference.current() else {
         return;
@@ -158,7 +160,7 @@ async fn run_archival_round(
         let name = provider.name.clone();
         let url = provider.url.clone();
         block_set.spawn(async move {
-            let (result, hash, sig) = timed_archival_block(&client, &url, slot).await;
+            let (result, hash, sig) = timed_archival_block(&client, &url, slot, timeout).await;
             (name, result, hash, sig)
         });
     }
@@ -194,7 +196,7 @@ async fn run_archival_round(
         let url = provider.url.clone();
         let sig = sig.clone();
         tx_set.spawn(async move {
-            let (result, tx_slot) = timed_archival_tx(&client, &url, &sig).await;
+            let (result, tx_slot) = timed_archival_tx(&client, &url, &sig, timeout).await;
             (name, result, tx_slot)
         });
     }
@@ -296,6 +298,7 @@ async fn timed_archival_block(
     client: &RpcClient,
     url: &str,
     slot: u64,
+    timeout: Duration,
 ) -> (CallResult, Option<String>, Option<String>) {
     let params = json!([slot, {
         "encoding": "json",
@@ -304,9 +307,9 @@ async fn timed_archival_block(
         "commitment": "confirmed",
         "maxSupportedTransactionVersion": 1,
     }]);
-    let start = Instant::now();
-    let resp = client.raw_call_checked(url, "getBlock", params).await;
-    let latency = start.elapsed();
+    let (resp, latency) = client
+        .raw_call_timed(url, "getBlock", params, Some(timeout))
+        .await;
     match resp {
         RawResponse::Result(value) => {
             let hash = value
@@ -342,15 +345,16 @@ async fn timed_archival_tx(
     client: &RpcClient,
     url: &str,
     signature: &str,
+    timeout: Duration,
 ) -> (CallResult, Option<u64>) {
     let params = json!([signature, {
         "encoding": "json",
         "commitment": "confirmed",
         "maxSupportedTransactionVersion": 1,
     }]);
-    let start = Instant::now();
-    let resp = client.raw_call_checked(url, "getTransaction", params).await;
-    let latency = start.elapsed();
+    let (resp, latency) = client
+        .raw_call_timed(url, "getTransaction", params, Some(timeout))
+        .await;
     match resp {
         RawResponse::Result(value) if value.is_null() => {
             (archival_result(latency, CallStatus::Skipped), None)
