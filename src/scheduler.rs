@@ -1,7 +1,8 @@
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use rand::RngExt;
+use sha2::{Digest, Sha256};
 use tokio::time::sleep;
 
 use crate::config::{CheckConfig, GpaDeriveConfig, GpaTarget};
@@ -29,6 +30,7 @@ pub fn spawn_checks(
     archival_anchor: ArchivalAnchor,
 ) {
     let shared = SharedState::default();
+    let seed = host_seed();
     let gpa_targets = Arc::new(gpa_targets);
     let derived_gpa = DerivedTargets::default();
     if let Some(config) = gpa_derive {
@@ -49,6 +51,7 @@ pub fn spawn_checks(
                 )
             })
             .map(|check| CheckTask {
+                phase: slot_phase(&seed, &endpoint.name, check.method, check.interval),
                 provider: endpoint.name.clone(),
                 url: endpoint.url.clone(),
                 check: check.clone(),
@@ -88,6 +91,7 @@ fn spawn_provider_runtime(provider: &str, tasks: Vec<CheckTask>) {
 }
 
 struct CheckTask {
+    phase: Duration,
     provider: String,
     url: String,
     check: CheckConfig,
@@ -109,7 +113,11 @@ impl CheckTask {
     async fn run(self) {
         let mut rotation = 0usize;
         let mut used_anchor: Option<String> = None;
+        let interval = self.check.interval.as_millis() as u64;
+        let phase = self.phase.as_millis() as u64;
+        let mut slot = next_slot_after(unix_millis(), interval, phase);
         loop {
+            sleep_until_unix_millis(slot + self.jitter_millis()).await;
             let gpa_target = rotated_target(
                 &self.gpa_targets,
                 &self.derived_gpa.current(),
@@ -147,7 +155,11 @@ impl CheckTask {
                 };
                 self.record(&result, target);
             }
-            sleep(self.next_delay()).await;
+            slot += interval;
+            let now = unix_millis();
+            if slot <= now {
+                slot = next_slot_after(now, interval, phase);
+            }
         }
     }
 
@@ -195,14 +207,56 @@ impl CheckTask {
             )
     }
 
-    fn next_delay(&self) -> Duration {
-        let jitter = self.check.jitter;
-        if jitter.is_zero() {
-            return self.check.interval;
+    fn jitter_millis(&self) -> u64 {
+        let jitter = self.check.jitter.as_millis() as u64;
+        if jitter == 0 {
+            return 0;
         }
-        let extra = rand::rng().random_range(0..=jitter.as_millis() as u64);
-        self.check.interval + Duration::from_millis(extra)
+        rand::rng().random_range(0..=jitter)
     }
+}
+
+/// Hostname that seeds the check slots, so hosts with the same config use different slots.
+fn host_seed() -> String {
+    std::fs::read_to_string("/proc/sys/kernel/hostname")
+        .ok()
+        .or_else(|| std::env::var("HOSTNAME").ok())
+        .map(|h| h.trim().to_owned())
+        .unwrap_or_default()
+}
+
+/// Offset of a provider+method inside its interval; stable across restarts.
+fn slot_phase(seed: &str, provider: &str, method: RpcMethod, interval: Duration) -> Duration {
+    let interval = interval.as_millis() as u64;
+    if interval == 0 {
+        return Duration::ZERO;
+    }
+    let digest = Sha256::digest(format!("{seed}|{provider}|{}", method.label()));
+    let hash = u64::from_le_bytes(digest[..8].try_into().expect("sha256 is 32 bytes"));
+    Duration::from_millis(hash % interval)
+}
+
+/// First wall-clock time after `now` that is `phase` past a multiple of `interval`.
+fn next_slot_after(now: u64, interval: u64, phase: u64) -> u64 {
+    if interval == 0 {
+        return now;
+    }
+    let base = now - now % interval + phase % interval;
+    if base > now {
+        base
+    } else {
+        base + interval
+    }
+}
+
+fn unix_millis() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis() as u64)
+}
+
+async fn sleep_until_unix_millis(at: u64) {
+    sleep(Duration::from_millis(at.saturating_sub(unix_millis()))).await;
 }
 
 #[derive(Clone, Default)]
@@ -369,6 +423,57 @@ mod tests {
         assert!(rotated_target(&[], &derived, method, 2).is_none());
         assert!(rotated_target(&[], &[], method, 1).is_none());
         assert!(rotated_target(&[], &derived[..1], method, 1).is_none());
+    }
+
+    #[test]
+    fn next_slot_is_the_first_phase_point_after_now() {
+        assert_eq!(next_slot_after(0, 60_000, 7_000), 7_000);
+        assert_eq!(next_slot_after(7_000, 60_000, 7_000), 67_000);
+        assert_eq!(next_slot_after(66_999, 60_000, 7_000), 67_000);
+        assert_eq!(next_slot_after(120_001, 60_000, 0), 180_000);
+        assert_eq!(next_slot_after(5, 0, 3), 5);
+    }
+
+    #[test]
+    fn slot_phase_is_stable_and_inside_the_interval() {
+        let interval = Duration::from_secs(60);
+        let a = slot_phase("host", "alpha", RpcMethod::GetProgramAccounts, interval);
+        assert_eq!(
+            a,
+            slot_phase("host", "alpha", RpcMethod::GetProgramAccounts, interval)
+        );
+        assert!(a < interval);
+        assert_eq!(
+            slot_phase("host", "alpha", RpcMethod::GetSlot, Duration::ZERO),
+            Duration::ZERO
+        );
+    }
+
+    #[test]
+    fn slot_phases_spread_providers_across_the_interval() {
+        let interval = Duration::from_secs(60);
+        let providers = ["p0", "p1", "p2", "p3", "p4", "p5", "p6"];
+        let mut phases: Vec<u64> = providers
+            .iter()
+            .map(|p| {
+                slot_phase("host", p, RpcMethod::GetProgramAccounts, interval).as_millis() as u64
+            })
+            .collect();
+        phases.sort_unstable();
+        phases.dedup();
+        assert_eq!(phases.len(), providers.len());
+        assert!(phases.last().unwrap() - phases.first().unwrap() > 10_000);
+        let other_host: Vec<u64> = providers
+            .iter()
+            .map(|p| {
+                slot_phase("other", p, RpcMethod::GetProgramAccounts, interval).as_millis() as u64
+            })
+            .collect();
+        assert_ne!(phases, {
+            let mut o = other_host.clone();
+            o.sort_unstable();
+            o
+        });
     }
 
     #[test]

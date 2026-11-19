@@ -122,7 +122,7 @@ Full reference: [`config.example.yaml`](./config.example.yaml). Durations accept
 | `reference_slot.source` | `max_observed` (neutral; highest `processed` slot seen across providers) or `endpoint` (poll a dedicated RPC). |
 | `reference_slot.endpoint` / `poll_interval` | Optional dedicated endpoint and poll cadence, required when `source: endpoint`. |
 | `providers[]` | List of `{ name, url }`. `url` may contain `${ENV_VAR}` placeholders. Names must be unique. |
-| `checks[]` | List of `{ method, interval, jitter }`. Each check runs on its own loop; `jitter` randomizes the period to avoid thundering herds. |
+| `checks[]` | List of `{ method, interval, jitter }`. Each check runs on its own loop at a fixed slot inside `interval`, from a hash of the hostname, provider and method, so checks spread evenly and keep their slot across restarts. `jitter` adds a random delay of up to that value after each slot. |
 | `request_timeout` | Per-request timeout for outbound RPC calls (default `10s`). |
 
 ### Providers
