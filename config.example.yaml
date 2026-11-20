@@ -128,7 +128,7 @@ providers:
     # Optional stated coverage: only probe from these geo groups (see src/geo.rs
     # for the region->geo mapping). Omit to be measured from every vantage.
     # The provider simply has no rows in excluded regions' panels.
-    geos: [us-east, us-west, eu-central, eu-west]
+    geos: [us-east, eu-central]
     # Optional per-region endpoint overrides (public, customer-usable URLs only);
     # any region not listed falls back to `url`.
     # region_urls:
