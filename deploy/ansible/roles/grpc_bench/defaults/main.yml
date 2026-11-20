@@ -46,8 +46,15 @@ grpc_bench_providers:
     url: "https://solana-mainnet.streaming.alchemy.com"
     token_secret: ALCHEMY_URL
     token_pattern: "/v2/([^/?#]+)"
-  # QuickNode is left out: its gRPC streams across the fleet ran up the bill.
-  # rpc-monitor still uses QUICKNODE_URL for its RPC checks.
+  # Yellowstone on the RPC endpoint's host at :443 (QuickNode calls :10000
+  # legacy); the x-token is the path token from QUICKNODE_URL
+  # (https://<name>.solana-mainnet.quiknode.pro/<token>/). QuickNode turned
+  # off credit consumption on our account for the benchmark (Nov 2026).
+  - name: quicknode
+    url_secret: QUICKNODE_URL
+    url_pattern: "^https?://([^/?#]+)"
+    token_secret: QUICKNODE_URL
+    token_pattern: "^https?://[^/]+/([^/?#]+)"
 
 # Nearest Helius LaserStream region per monitor_region.
 grpc_bench_helius_regions:
