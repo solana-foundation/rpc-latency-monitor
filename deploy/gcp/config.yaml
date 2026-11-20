@@ -20,7 +20,7 @@ providers:
     url: "${CHAINSTACK_URL}"
   - name: fluxrpc
     url: "https://cdn.fluxrpc.com?key=${FLUXRPC_KEY}"
-    geos: [us-east, us-west, eu-central, eu-west]
+    geos: [us-east, eu-central, eu-west]
     region_urls:
       europe-west2: "https://eu.fluxrpc.com?key=${FLUXRPC_KEY}"
       europe-west3: "https://eu.fluxrpc.com?key=${FLUXRPC_KEY}"
@@ -35,14 +35,10 @@ providers:
       lon1: "https://eu.fluxrpc.com?key=${FLUXRPC_KEY}"
       ams3: "https://eu.fluxrpc.com?key=${FLUXRPC_KEY}"
       us-east4: "https://us.fluxrpc.com?key=${FLUXRPC_KEY}"
-      us-west2: "https://us.fluxrpc.com?key=${FLUXRPC_KEY}"
       us-east-1: "https://us.fluxrpc.com?key=${FLUXRPC_KEY}"
-      us-west-1: "https://us.fluxrpc.com?key=${FLUXRPC_KEY}"
       nyc: "https://us.fluxrpc.com?key=${FLUXRPC_KEY}"
-      lax: "https://us.fluxrpc.com?key=${FLUXRPC_KEY}"
       ewr2: "https://us.fluxrpc.com?key=${FLUXRPC_KEY}"
       pit1: "https://us.fluxrpc.com?key=${FLUXRPC_KEY}"
-      lax1: "https://us.fluxrpc.com?key=${FLUXRPC_KEY}"
   - name: helius
     url: "https://beta.helius-rpc.com/?api-key=${HELIUS_API_KEY}"
   - name: triton
