@@ -144,6 +144,8 @@ providers:
     url: "https://cdn.fluxrpc.com?key=${FLUXRPC_KEY}"
   - name: solanavibestation
     url: "https://elite.rpc.solanavibestation.com/?api_key=${SOLANAVIBESTATION_API_KEY}"
+  - name: carbium
+    url: "https://services.carbium.sh/${CARBIUM_API_KEY}"
 ```
 
 ### Checks
