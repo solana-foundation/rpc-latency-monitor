@@ -124,7 +124,7 @@
 
 - name: Build monitor (release, locked)
   ansible.builtin.shell: |
-    source ~/.cargo/env && cargo build --release --locked
+    source ~/.cargo/env && cargo build --release --locked -p rpc-latency-monitor
   args:
     chdir: "{{ monitor_src_dir }}"
     executable: /bin/bash

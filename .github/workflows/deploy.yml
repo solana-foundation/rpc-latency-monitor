@@ -166,7 +166,7 @@ jobs:
             env PROVIDER="$PROVIDER" IMAGE_SHA="$IMAGE_SHA" TARGET="$TARGET" \
                 PROJECT="$PROJECT" REGION="$REGION" \
                 GCP_TF_STATE_BUCKET="$GCP_TF_STATE_BUCKET" AWS_TF_STATE_BUCKET="$AWS_TF_STATE_BUCKET" \
-            ./deploy/deploy.sh
+            ./rpc-monitor/deploy/deploy.sh
 
       - name: Notify Slack — deploy succeeded
         if: ${{ !cancelled() && steps.rpc.outcome == 'success' && env.SLACK_WEBHOOK != '' }}
@@ -232,7 +232,7 @@ jobs:
           GRAFANA_URL: ${{ vars.GRAFANA_API_URL }}
         run: |
           set -euo pipefail
-          DEFAULTS=deploy/ansible/roles/grpc_bench/defaults/main.yml
+          DEFAULTS=rpc-monitor/deploy/ansible/roles/grpc_bench/defaults/main.yml
           REF="${INPUT_REF:-$(sed -n 's/^grpc_bench_ref: "\([0-9a-f]*\)"$/\1/p' "$DEFAULTS")}"
           RUN=false; WHY=""
           case "$TARGET:$PROVIDER" in
@@ -242,7 +242,8 @@ jobs:
               elif [ "$EVENT" = workflow_dispatch ]; then
                 RUN=true; WHY="manual dispatch"
               elif ! git diff --quiet "${HEAD_SHA}^" "$HEAD_SHA" -- \
-                  deploy/ansible/roles/grpc_bench deploy/ansible/grpc-bench.yml deploy/ansible/group_vars; then
+                  rpc-monitor/deploy/ansible/roles/grpc_bench rpc-monitor/deploy/ansible/grpc-bench.yml \
+                  rpc-monitor/deploy/ansible/group_vars; then
                 RUN=true; WHY="gRPC deploy files changed in ${HEAD_SHA:0:7}"
               else
                 WHY="no gRPC deploy changes in ${HEAD_SHA:0:7}"
@@ -303,7 +304,7 @@ jobs:
           set -euo pipefail
           doppler run --project "$DOPPLER_PROJECT" --config "$DOPPLER_CONFIG" -- \
             env PLAYBOOK=grpc-bench.yml LIMIT="$METAL_HOSTS" GRPC_BENCH_REF="$GRPC_BENCH_REF" \
-            ./deploy/ansible/deploy.sh
+            ./rpc-monitor/deploy/ansible/deploy.sh
 
       - name: Notify Slack — gRPC benchmark deploy finished
         if: ${{ !cancelled() && steps.grpc.outputs.run == 'true' && steps.grpc_deploy.outcome != 'skipped' && env.SLACK_WEBHOOK != '' }}
