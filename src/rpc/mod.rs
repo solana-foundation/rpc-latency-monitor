@@ -216,6 +216,17 @@ impl RpcClient {
     }
 
     pub async fn raw_call_checked(&self, url: &str, method: &str, params: Value) -> RawResponse {
+        self.raw_call_timed(url, method, params, None).await.0
+    }
+
+    /// The latency stops after the body read, before the parse, as in `call`.
+    pub async fn raw_call_timed(
+        &self,
+        url: &str,
+        method: &str,
+        params: Value,
+        timeout: Option<Duration>,
+    ) -> (RawResponse, Duration) {
         let body = serde_json::json!({
             "jsonrpc": "2.0",
             "id": self.next_id.fetch_add(1, Ordering::Relaxed),
@@ -223,35 +234,43 @@ impl RpcClient {
             "params": params,
         });
         let http = self.client_for(url);
-        let Ok(response) = http.post(url).json(&body).send().await else {
-            return RawResponse::Unavailable;
+        let mut request = http.post(url).json(&body);
+        if let Some(timeout) = timeout {
+            request = request.timeout(timeout);
+        }
+        let start = Instant::now();
+        let Ok(response) = request.send().await else {
+            return (RawResponse::Unavailable, start.elapsed());
         };
         if !response.status().is_success() {
-            return RawResponse::Unavailable;
+            return (RawResponse::Unavailable, start.elapsed());
         }
-        let Ok(bytes) = response.bytes().await else {
-            return RawResponse::Unavailable;
+        let body = response.bytes().await;
+        let latency = start.elapsed();
+        let Ok(bytes) = body else {
+            return (RawResponse::Unavailable, latency);
         };
         let mut json: Value = if bytes.len() >= LARGE_BODY_BYTES {
             let _permit = LARGE_PARSE_GATE.acquire().await;
             match tokio::task::spawn_blocking(move || serde_json::from_slice(&bytes)).await {
                 Ok(Ok(json)) => json,
-                _ => return RawResponse::Unavailable,
+                _ => return (RawResponse::Unavailable, latency),
             }
         } else {
             match serde_json::from_slice(&bytes) {
                 Ok(json) => json,
-                Err(_) => return RawResponse::Unavailable,
+                Err(_) => return (RawResponse::Unavailable, latency),
             }
         };
         if let Some(error) = json.get("error") {
             let code = error.get("code").and_then(Value::as_i64).unwrap_or(0);
-            return RawResponse::RpcError(code);
+            return (RawResponse::RpcError(code), latency);
         }
-        match json.get_mut("result") {
+        let response = match json.get_mut("result") {
             Some(value) => RawResponse::Result(value.take()),
             None => RawResponse::Unavailable,
-        }
+        };
+        (response, latency)
     }
 
     pub async fn call(
@@ -436,6 +455,99 @@ mod tests {
             handle.await.unwrap();
         }
         assert!(peak.load(Ordering::SeqCst) <= 2);
+    }
+
+    /// Answers each POST with `body` after `delay`, one connection per request.
+    fn rpc_server(delay: Duration, body: Vec<u8>) -> String {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let mut stream = stream.unwrap();
+                let mut request = Vec::new();
+                let mut buf = [0u8; 1024];
+                let head_end = loop {
+                    if let Some(i) = request.windows(4).position(|w| w == b"\r\n\r\n") {
+                        break i + 4;
+                    }
+                    let n = stream.read(&mut buf).unwrap();
+                    request.extend_from_slice(&buf[..n]);
+                };
+                let content_length = String::from_utf8_lossy(&request[..head_end])
+                    .lines()
+                    .find_map(|l| {
+                        let (name, value) = l.split_once(':')?;
+                        name.eq_ignore_ascii_case("content-length")
+                            .then(|| value.trim().parse::<usize>().ok())?
+                    })
+                    .unwrap_or(0);
+                while request.len() < head_end + content_length {
+                    let n = stream.read(&mut buf).unwrap();
+                    request.extend_from_slice(&buf[..n]);
+                }
+                std::thread::sleep(delay);
+                let head = format!(
+                    "HTTP/1.1 200 OK\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
+                    body.len()
+                );
+                let _ = stream.write_all(head.as_bytes());
+                let _ = stream.write_all(&body);
+            }
+        });
+        format!("http://{addr}/")
+    }
+
+    #[tokio::test]
+    async fn raw_call_timed_timeout_overrides_the_client_timeout() {
+        let url = rpc_server(
+            Duration::from_millis(150),
+            br#"{"jsonrpc":"2.0","result":7,"id":1}"#.to_vec(),
+        );
+        let client = RpcClient::new(Duration::from_millis(50)).unwrap();
+        let (resp, _) = client
+            .raw_call_timed(&url, "getSlot", serde_json::json!([]), None)
+            .await;
+        assert!(matches!(resp, RawResponse::Unavailable));
+        let (resp, latency) = client
+            .raw_call_timed(
+                &url,
+                "getSlot",
+                serde_json::json!([]),
+                Some(Duration::from_secs(2)),
+            )
+            .await;
+        assert!(matches!(resp, RawResponse::Result(ref v) if v == 7));
+        assert!(latency >= Duration::from_millis(150));
+    }
+
+    #[tokio::test]
+    async fn raw_call_timed_latency_excludes_the_parse_gate_wait() {
+        let filler = "x".repeat(2 * LARGE_BODY_BYTES);
+        let body = format!(r#"{{"jsonrpc":"2.0","result":"{filler}","id":1}}"#);
+        let url = rpc_server(Duration::ZERO, body.into_bytes());
+        let client = RpcClient::new(Duration::from_secs(5)).unwrap();
+        let hold = Duration::from_millis(500);
+        let permits = LARGE_PARSE_GATE.acquire_many(2).await.unwrap();
+        let start = Instant::now();
+        let release = tokio::spawn(async move {
+            tokio::time::sleep(hold).await;
+            drop(permits);
+        });
+        let (resp, latency) = client
+            .raw_call_timed(&url, "getBlock", serde_json::json!([]), None)
+            .await;
+        let total = start.elapsed();
+        release.await.unwrap();
+        assert!(matches!(resp, RawResponse::Result(ref v) if v.as_str() == Some(filler.as_str())));
+        assert!(
+            total >= hold,
+            "the call returned before the gate opened: {total:?}"
+        );
+        assert!(
+            latency < hold / 2,
+            "latency includes the gate wait: {latency:?}"
+        );
     }
 
     #[test]
