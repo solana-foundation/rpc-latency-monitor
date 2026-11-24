@@ -121,6 +121,9 @@ gpa_targets:
 providers:
   - name: alchemy
     url: "${ALCHEMY_URL}"
+  - name: carbium
+    url: "https://services.carbium.sh/${CARBIUM_API_KEY}"
+    geos: [eu-central, eu-west]
   - name: chainstack
     url: "${CHAINSTACK_URL}"
   - name: fluxrpc
