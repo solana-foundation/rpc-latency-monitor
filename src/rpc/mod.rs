@@ -457,8 +457,8 @@ mod tests {
         assert!(peak.load(Ordering::SeqCst) <= 2);
     }
 
-    /// Answers each POST after `delay`, one connection per request.
-    fn slow_rpc_server(delay: Duration) -> String {
+    /// Answers each POST with `body` after `delay`, one connection per request.
+    fn rpc_server(delay: Duration, body: Vec<u8>) -> String {
         use std::io::{Read, Write};
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let addr = listener.local_addr().unwrap();
@@ -467,18 +467,32 @@ mod tests {
                 let mut stream = stream.unwrap();
                 let mut request = Vec::new();
                 let mut buf = [0u8; 1024];
-                while !request.windows(4).any(|w| w == b"\r\n\r\n") {
+                let head_end = loop {
+                    if let Some(i) = request.windows(4).position(|w| w == b"\r\n\r\n") {
+                        break i + 4;
+                    }
+                    let n = stream.read(&mut buf).unwrap();
+                    request.extend_from_slice(&buf[..n]);
+                };
+                let content_length = String::from_utf8_lossy(&request[..head_end])
+                    .lines()
+                    .find_map(|l| {
+                        let (name, value) = l.split_once(':')?;
+                        name.eq_ignore_ascii_case("content-length")
+                            .then(|| value.trim().parse::<usize>().ok())?
+                    })
+                    .unwrap_or(0);
+                while request.len() < head_end + content_length {
                     let n = stream.read(&mut buf).unwrap();
                     request.extend_from_slice(&buf[..n]);
                 }
                 std::thread::sleep(delay);
-                let body = br#"{"jsonrpc":"2.0","result":7,"id":1}"#;
                 let head = format!(
                     "HTTP/1.1 200 OK\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
                     body.len()
                 );
                 let _ = stream.write_all(head.as_bytes());
-                let _ = stream.write_all(body);
+                let _ = stream.write_all(&body);
             }
         });
         format!("http://{addr}/")
@@ -486,7 +500,10 @@ mod tests {
 
     #[tokio::test]
     async fn raw_call_timed_timeout_overrides_the_client_timeout() {
-        let url = slow_rpc_server(Duration::from_millis(150));
+        let url = rpc_server(
+            Duration::from_millis(150),
+            br#"{"jsonrpc":"2.0","result":7,"id":1}"#.to_vec(),
+        );
         let client = RpcClient::new(Duration::from_millis(50)).unwrap();
         let (resp, _) = client
             .raw_call_timed(&url, "getSlot", serde_json::json!([]), None)
@@ -502,6 +519,35 @@ mod tests {
             .await;
         assert!(matches!(resp, RawResponse::Result(ref v) if v == 7));
         assert!(latency >= Duration::from_millis(150));
+    }
+
+    #[tokio::test]
+    async fn raw_call_timed_latency_excludes_the_parse_gate_wait() {
+        let filler = "x".repeat(2 * LARGE_BODY_BYTES);
+        let body = format!(r#"{{"jsonrpc":"2.0","result":"{filler}","id":1}}"#);
+        let url = rpc_server(Duration::ZERO, body.into_bytes());
+        let client = RpcClient::new(Duration::from_secs(5)).unwrap();
+        let hold = Duration::from_millis(500);
+        let permits = LARGE_PARSE_GATE.acquire_many(2).await.unwrap();
+        let start = Instant::now();
+        let release = tokio::spawn(async move {
+            tokio::time::sleep(hold).await;
+            drop(permits);
+        });
+        let (resp, latency) = client
+            .raw_call_timed(&url, "getBlock", serde_json::json!([]), None)
+            .await;
+        let total = start.elapsed();
+        release.await.unwrap();
+        assert!(matches!(resp, RawResponse::Result(ref v) if v.as_str() == Some(filler.as_str())));
+        assert!(
+            total >= hold,
+            "the call returned before the gate opened: {total:?}"
+        );
+        assert!(
+            latency < hold / 2,
+            "latency includes the gate wait: {latency:?}"
+        );
     }
 
     #[test]
