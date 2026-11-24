@@ -4,6 +4,10 @@
 Cargo.lock.orig
 
 # Local config & secrets — never commit real endpoints/keys
+# Keep legacy root configs ignored in existing checkouts.
+/config.yaml
+/config.*.yaml
+!/config.example.yaml
 /rpc-monitor/config.yaml
 /rpc-monitor/config.*.yaml
 !/rpc-monitor/config.example.yaml
