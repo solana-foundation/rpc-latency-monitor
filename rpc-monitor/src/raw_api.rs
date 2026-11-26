@@ -533,6 +533,20 @@ async fn ensure_schema(state: &Arc<AppState>) -> anyhow::Result<()> {
     ] {
         client.batch_execute(migration).await?;
     }
+    // A failed concurrent build leaves an invalid index that IF NOT EXISTS
+    // would keep; drop it so the build below starts over.
+    client
+        .batch_execute(
+            "DO $$ BEGIN \
+               IF EXISTS (SELECT 1 FROM pg_index WHERE indexrelid = 'probe_samples_ts_desc'::regclass AND NOT indisvalid) THEN \
+                 DROP INDEX probe_samples_ts_desc; \
+               END IF; \
+             EXCEPTION WHEN undefined_table THEN NULL; END $$",
+        )
+        .await?;
+    client
+        .batch_execute(include_str!("../deploy/migrations/0003_probe_samples_ts_btree.sql"))
+        .await?;
     Ok(())
 }
 
@@ -609,6 +623,8 @@ async fn insert_samples(state: &AppState, rows: &[IngestRow]) -> anyhow::Result<
 
 async fn query_samples(state: &AppState, query: &RawQuery) -> anyhow::Result<Vec<Value>> {
     let client = pg_connect(state).await?;
+    // Fail with 502 instead of holding the request open on a slow plan.
+    client.batch_execute("SET statement_timeout = '30s'").await?;
     let mut sql = String::from(
         "SELECT extract(epoch from ts)::float8 AS ts, provider, method, infra, region, target, status, error_kind, latency_ms, slot, endpoint_ip \
          FROM probe_samples WHERE ts >= to_timestamp($1) AND ts < to_timestamp($2)",
