@@ -1,5 +1,5 @@
 {
-  "receiver": "rpc-latency-slack",
+  "receiver": "rpc-monitor-slack",
   "object_matchers": [
     [
       "grafana_folder",
