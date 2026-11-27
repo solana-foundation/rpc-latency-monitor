@@ -36,6 +36,12 @@ variable "monthly_cost_usd" {
   }
 }
 
+# Set to "invoice" once monthly_cost_usd holds billed figures rather than list prices.
+variable "cost_source" {
+  type    = string
+  default = "list-price"
+}
+
 variable "monitor_image" {
   type = string
 }

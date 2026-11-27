@@ -224,7 +224,7 @@
             "type": "prometheus",
             "uid": "rpc-latency-prom"
           },
-          "expr": "count(rpc_monitor_host_monthly_cost_usd{source=\"list-price\"}) or vector(0)"
+          "expr": "count(rpc_monitor_host_monthly_cost_usd{source=\"list-price\", infra=~\"$infra\", region=~\"$region\", host=~\"$host\"}) or vector(0)"
         }
       ]
     },
@@ -684,7 +684,7 @@
           },
           "format": "table",
           "instant": true,
-          "expr": "node_load1{infra=~\"$infra\", region=~\"$region\", host=~\"$host\", job=\"node\"} / count by (infra, region, host) (node_cpu_seconds_total{infra=~\"$infra\", region=~\"$region\", host=~\"$host\", job=\"node\", mode=\"idle\"})"
+          "expr": "node_load1{infra=~\"$infra\", region=~\"$region\", host=~\"$host\", job=\"node\"} / on (infra, region, host) count by (infra, region, host) (node_cpu_seconds_total{infra=~\"$infra\", region=~\"$region\", host=~\"$host\", job=\"node\", mode=\"idle\"})"
         },
         {
           "refId": "E",
@@ -877,7 +877,7 @@
             "type": "prometheus",
             "uid": "rpc-latency-prom"
           },
-          "expr": "node_load1{infra=~\"$infra\", region=~\"$region\", host=~\"$host\", job=\"node\"} / count by (infra, region, host) (node_cpu_seconds_total{infra=~\"$infra\", region=~\"$region\", host=~\"$host\", job=\"node\", mode=\"idle\"})",
+          "expr": "node_load1{infra=~\"$infra\", region=~\"$region\", host=~\"$host\", job=\"node\"} / on (infra, region, host) count by (infra, region, host) (node_cpu_seconds_total{infra=~\"$infra\", region=~\"$region\", host=~\"$host\", job=\"node\", mode=\"idle\"})",
           "legendFormat": "{{host}} ({{region}})"
         }
       ]

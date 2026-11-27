@@ -27,6 +27,7 @@ resource "google_compute_instance" "monitor" {
   metadata = {
     monitor-region   = each.key
     monthly-cost-usd = tostring(lookup(var.monthly_cost_usd, each.key, 0))
+    cost-source      = var.cost_source
     monitor-image    = var.monitor_image
     doppler-token    = var.doppler_token
     monitor-config   = file(var.config_file)

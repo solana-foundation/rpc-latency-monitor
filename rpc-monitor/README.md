@@ -266,9 +266,10 @@ instances in terraform's `monitor_instances` output; anything else carrying the
 
 ### Accessing the VMs
 
-There is no shared bastion; each fleet is reached through its own provider, and every box runs
-Ubuntu with the service user `rpc-monitor` (the monitor and Alloy run as systemd units on bare
-metal, as `rpc-monitor` / `alloy` Docker containers on GCP and AWS).
+There is no shared bastion; each fleet is reached through its own provider. Bare-metal hosts run
+Ubuntu, with the monitor and Alloy running as systemd units under the `rpc-monitor` service user.
+GCP runs Container-Optimized OS and AWS runs Amazon Linux 2023; both run the monitor and Alloy
+as `rpc-monitor` / `alloy` Docker containers.
 
 | Infra | Where the hosts are listed | Console | Shell |
 |-------|----------------------------|---------|-------|
@@ -323,7 +324,8 @@ per host. The figure is `rpc_monitor_host_monthly_cost_usd`, a static gauge writ
 time and read by Alloy's textfile collector: terraform's `monthly_cost_usd` map for GCP/AWS
 (`deploy/{gcp,aws}/terraform/variables.tf`) and the ansible group vars' `monthly_cost_usd` / `server_plan`
 for bare metal (`deploy/ansible/group_vars/{latitude,tsw}.yml`, overridable per host in the inventory). The committed values are public list prices
-(`source="list-price"`); set `cost_source: invoice` when you replace one with the billed amount.
+(`source="list-price"`); set `cost_source: invoice` (ansible) or `-var cost_source=invoice`
+(terraform) when you replace them with billed amounts.
 Every `.json` in `grafana/` is pushed to Grafana Cloud by the `build-publish` workflow.
 
 The **public, filterable data view** is built natively on **solana.com/data** — it queries these same

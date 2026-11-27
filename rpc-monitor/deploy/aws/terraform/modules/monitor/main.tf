@@ -43,6 +43,7 @@ resource "aws_instance" "monitor" {
     monitor_image      = var.monitor_image
     monitor_region     = var.region_label
     monthly_cost_usd   = var.monthly_cost_usd
+    cost_source        = var.cost_source
     instance_type      = var.instance_type
     doppler_token      = var.doppler_token
     monitor_config_b64 = base64encode(var.monitor_config)

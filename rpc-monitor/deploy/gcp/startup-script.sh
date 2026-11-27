@@ -23,6 +23,7 @@ export IMAGE="$(meta monitor-image)"
 export DOPPLER_TOKEN="$(meta doppler-token)"
 export INFRA=gcp
 export MONTHLY_COST_USD="$(meta monthly-cost-usd)"
+export COST_SOURCE="$(meta cost-source)"
 export INSTANCE_PLAN="$(curl -s -H "Metadata-Flavor: Google" \
   http://metadata.google.internal/computeMetadata/v1/instance/machine-type | sed 's#.*/##')"
 export CONF_DIR=/var/lib/rpc-latency-monitor
