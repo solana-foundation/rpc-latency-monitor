@@ -25,12 +25,14 @@ resource "google_compute_instance" "monitor" {
   }
 
   metadata = {
-    monitor-region = each.key
-    monitor-image  = var.monitor_image
-    doppler-token  = var.doppler_token
-    monitor-config = file(var.config_file)
-    alloy-config   = file(var.alloy_config_file)
-    startup-script = "${file("${path.module}/../startup-script.sh")}\n${file("${path.module}/../../shared/run-monitor.sh")}"
+    monitor-region   = each.key
+    monthly-cost-usd = tostring(lookup(var.monthly_cost_usd, each.key, 0))
+    cost-source      = var.cost_source
+    monitor-image    = var.monitor_image
+    doppler-token    = var.doppler_token
+    monitor-config   = file(var.config_file)
+    alloy-config     = file(var.alloy_config_file)
+    startup-script   = "${file("${path.module}/../startup-script.sh")}\n${file("${path.module}/../../shared/run-monitor.sh")}"
   }
 
   labels = {

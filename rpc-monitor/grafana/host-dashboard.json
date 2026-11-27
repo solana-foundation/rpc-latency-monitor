@@ -1,0 +1,1141 @@
+{
+  "title": "RPC Monitor Hosts",
+  "uid": "rpc-latency-monitor-hosts",
+  "schemaVersion": 39,
+  "editable": true,
+  "tags": [
+    "solana",
+    "rpc",
+    "latency",
+    "hosts"
+  ],
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "refresh": "1m",
+  "description": "CPU, memory, disk and network of every VM that runs rpc-latency-monitor (Alloy prometheus.exporter.unix, job=node). Use it to rule out a starved vantage point before blaming a provider. The Cost row reads rpc_monitor_host_monthly_cost_usd, a static per-host gauge written at provision time (terraform monthly_cost_usd for GCP/AWS, inventory monthly_cost_usd for bare metal); source=list-price marks estimates not yet replaced by invoice figures.",
+  "links": [
+    {
+      "title": "RPC Latency Monitor",
+      "type": "dashboards",
+      "tags": [
+        "latency"
+      ],
+      "asDropdown": false,
+      "includeVars": true,
+      "keepTime": true
+    }
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "infra",
+        "type": "custom",
+        "query": "Teraswitch : tsw, Latitude : latitude, AWS : aws, GCP : gcp",
+        "includeAll": true,
+        "multi": false,
+        "allValue": ".*",
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        }
+      },
+      {
+        "name": "region",
+        "type": "query",
+        "label": "region",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "rpc-latency-prom"
+        },
+        "query": "label_values(up{job=\"node\", infra=~\"$infra\"}, region)",
+        "refresh": 2,
+        "includeAll": true,
+        "multi": true,
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        },
+        "sort": 1
+      },
+      {
+        "name": "host",
+        "type": "query",
+        "label": "host",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "rpc-latency-prom"
+        },
+        "query": "label_values(up{job=\"node\", infra=~\"$infra\", region=~\"$region\"}, host)",
+        "refresh": 2,
+        "includeAll": true,
+        "multi": true,
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        },
+        "sort": 1
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 20,
+      "type": "row",
+      "title": "Cost (monthly, USD)",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "panels": []
+    },
+    {
+      "id": 21,
+      "type": "stat",
+      "title": "Fleet / month",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "rpc-latency-prom"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 0,
+        "y": 1
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "rpc-latency-prom"
+          },
+          "expr": "sum(rpc_monitor_host_monthly_cost_usd{infra=~\"$infra\", region=~\"$region\", host=~\"$host\"})"
+        }
+      ]
+    },
+    {
+      "id": 22,
+      "type": "stat",
+      "title": "Fleet / year",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "rpc-latency-prom"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 0,
+        "y": 5
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "rpc-latency-prom"
+          },
+          "expr": "sum(rpc_monitor_host_monthly_cost_usd{infra=~\"$infra\", region=~\"$region\", host=~\"$host\"}) * 12"
+        }
+      ]
+    },
+    {
+      "id": 23,
+      "type": "stat",
+      "title": "Hosts priced from list (not invoice)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "rpc-latency-prom"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 0,
+        "y": 9
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "rpc-latency-prom"
+          },
+          "expr": "count(rpc_monitor_host_monthly_cost_usd{source=\"list-price\", infra=~\"$infra\", region=~\"$region\", host=~\"$host\"}) or vector(0)"
+        }
+      ]
+    },
+    {
+      "id": 24,
+      "type": "table",
+      "title": "Cost by infra",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "rpc-latency-prom"
+      },
+      "gridPos": {
+        "h": 12,
+        "w": 10,
+        "x": 4,
+        "y": 1
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "$ / host"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "currencyUSD"
+              },
+              {
+                "id": "decimals",
+                "value": 2
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "$ / month"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "currencyUSD"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "gauge",
+                  "mode": "basic"
+                }
+              },
+              {
+                "id": "min",
+                "value": 0
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "$ / year"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "currencyUSD"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "share"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percentunit"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "sortBy": [
+          {
+            "displayName": "$ / month",
+            "desc": true
+          }
+        ],
+        "footer": {
+          "show": true,
+          "reducer": [
+            "sum"
+          ],
+          "fields": [
+            "$ / month",
+            "$ / year",
+            "hosts"
+          ]
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "rpc-latency-prom"
+          },
+          "expr": "count by (infra) (rpc_monitor_host_monthly_cost_usd{infra=~\"$infra\", region=~\"$region\", host=~\"$host\"})",
+          "format": "table",
+          "instant": true
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "rpc-latency-prom"
+          },
+          "expr": "avg by (infra) (rpc_monitor_host_monthly_cost_usd{infra=~\"$infra\", region=~\"$region\", host=~\"$host\"})",
+          "format": "table",
+          "instant": true
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "rpc-latency-prom"
+          },
+          "expr": "sum by (infra) (rpc_monitor_host_monthly_cost_usd{infra=~\"$infra\", region=~\"$region\", host=~\"$host\"})",
+          "format": "table",
+          "instant": true
+        },
+        {
+          "refId": "D",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "rpc-latency-prom"
+          },
+          "expr": "sum by (infra) (rpc_monitor_host_monthly_cost_usd{infra=~\"$infra\", region=~\"$region\", host=~\"$host\"}) * 12",
+          "format": "table",
+          "instant": true
+        },
+        {
+          "refId": "E",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "rpc-latency-prom"
+          },
+          "expr": "sum by (infra) (rpc_monitor_host_monthly_cost_usd{infra=~\"$infra\", region=~\"$region\", host=~\"$host\"}) / ignoring(infra) group_left sum(rpc_monitor_host_monthly_cost_usd{infra=~\"$infra\", region=~\"$region\", host=~\"$host\"})",
+          "format": "table",
+          "instant": true
+        }
+      ],
+      "transformations": [
+        {
+          "id": "merge",
+          "options": {}
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true
+            },
+            "renameByName": {
+              "Value #A": "hosts",
+              "Value #B": "$ / host",
+              "Value #C": "$ / month",
+              "Value #D": "$ / year",
+              "Value #E": "share"
+            },
+            "indexByName": {
+              "infra": 0,
+              "hosts": 1,
+              "Value #B": 2,
+              "Value #C": 3,
+              "Value #D": 4,
+              "Value #E": 5
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": 25,
+      "type": "bargauge",
+      "title": "Cost by region ($ / month)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "rpc-latency-prom"
+      },
+      "gridPos": {
+        "h": 12,
+        "w": 10,
+        "x": 14,
+        "y": 1
+      },
+      "options": {
+        "orientation": "horizontal",
+        "displayMode": "gradient",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "showUnfilled": true
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "decimals": 0,
+          "min": 0
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "rpc-latency-prom"
+          },
+          "expr": "sort_desc(sum by (infra, region) (rpc_monitor_host_monthly_cost_usd{infra=~\"$infra\", region=~\"$region\", host=~\"$host\"}))",
+          "legendFormat": "{{region}} ({{infra}})"
+        }
+      ]
+    },
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Hosts reporting",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "rpc-latency-prom"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 13
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "rpc-latency-prom"
+          },
+          "expr": "count(up{infra=~\"$infra\", region=~\"$region\", host=~\"$host\", job=\"node\"} == 1)",
+          "legendFormat": "up"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "table",
+      "title": "Host status",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "rpc-latency-prom"
+      },
+      "gridPos": {
+        "h": 12,
+        "w": 18,
+        "x": 6,
+        "y": 13
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "CPU busy"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percent"
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "gauge"
+                }
+              },
+              {
+                "id": "min",
+                "value": 0
+              },
+              {
+                "id": "max",
+                "value": 100
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Memory used"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percent"
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "gauge"
+                }
+              },
+              {
+                "id": "min",
+                "value": 0
+              },
+              {
+                "id": "max",
+                "value": 100
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Root FS used"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percent"
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "gauge"
+                }
+              },
+              {
+                "id": "min",
+                "value": 0
+              },
+              {
+                "id": "max",
+                "value": 100
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Load (1m) / core"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "none"
+              },
+              {
+                "id": "decimals",
+                "value": 2
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "$ / month"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "currencyUSD"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "sortBy": [
+          {
+            "displayName": "CPU busy",
+            "desc": true
+          }
+        ]
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "rpc-latency-prom"
+          },
+          "format": "table",
+          "instant": true,
+          "expr": "100 * (1 - avg by (infra, region, host) (rate(node_cpu_seconds_total{infra=~\"$infra\", region=~\"$region\", host=~\"$host\", job=\"node\", mode=\"idle\"}[5m])))"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "rpc-latency-prom"
+          },
+          "format": "table",
+          "instant": true,
+          "expr": "100 * (1 - node_memory_MemAvailable_bytes{infra=~\"$infra\", region=~\"$region\", host=~\"$host\", job=\"node\"} / node_memory_MemTotal_bytes{infra=~\"$infra\", region=~\"$region\", host=~\"$host\", job=\"node\"})"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "rpc-latency-prom"
+          },
+          "format": "table",
+          "instant": true,
+          "expr": "100 * (1 - node_filesystem_avail_bytes{infra=~\"$infra\", region=~\"$region\", host=~\"$host\", job=\"node\", mountpoint=\"/\"} / node_filesystem_size_bytes{infra=~\"$infra\", region=~\"$region\", host=~\"$host\", job=\"node\", mountpoint=\"/\"})"
+        },
+        {
+          "refId": "D",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "rpc-latency-prom"
+          },
+          "format": "table",
+          "instant": true,
+          "expr": "node_load1{infra=~\"$infra\", region=~\"$region\", host=~\"$host\", job=\"node\"} / on (infra, region, host) count by (infra, region, host) (node_cpu_seconds_total{infra=~\"$infra\", region=~\"$region\", host=~\"$host\", job=\"node\", mode=\"idle\"})"
+        },
+        {
+          "refId": "E",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "rpc-latency-prom"
+          },
+          "expr": "rpc_monitor_host_monthly_cost_usd{infra=~\"$infra\", region=~\"$region\", host=~\"$host\"}",
+          "format": "table",
+          "instant": true
+        }
+      ],
+      "transformations": [
+        {
+          "id": "merge",
+          "options": {}
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "job": true,
+              "instance": true,
+              "__name__": true,
+              "device": true,
+              "fstype": true,
+              "mountpoint": true,
+              "source": true
+            },
+            "renameByName": {
+              "Value #A": "CPU busy",
+              "Value #B": "Memory used",
+              "Value #C": "Root FS used",
+              "Value #D": "Load (1m) / core",
+              "Value #E": "$ / month"
+            },
+            "indexByName": {
+              "infra": 0,
+              "region": 1,
+              "host": 2,
+              "Value #A": 5,
+              "Value #B": 6,
+              "Value #D": 7,
+              "Value #C": 8,
+              "plan": 3,
+              "Value #E": 4
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "CPU busy",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "rpc-latency-prom"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 21
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max",
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "rpc-latency-prom"
+          },
+          "expr": "100 * (1 - avg by (infra, region, host) (rate(node_cpu_seconds_total{infra=~\"$infra\", region=~\"$region\", host=~\"$host\", job=\"node\", mode=\"idle\"}[$__rate_interval])))",
+          "legendFormat": "{{host}} ({{region}})"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Memory used",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "rpc-latency-prom"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 21
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max",
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "rpc-latency-prom"
+          },
+          "expr": "100 * (1 - node_memory_MemAvailable_bytes{infra=~\"$infra\", region=~\"$region\", host=~\"$host\", job=\"node\"} / node_memory_MemTotal_bytes{infra=~\"$infra\", region=~\"$region\", host=~\"$host\", job=\"node\"})",
+          "legendFormat": "{{host}} ({{region}})"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Load average (1m) per core",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "rpc-latency-prom"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 29
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max",
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "rpc-latency-prom"
+          },
+          "expr": "node_load1{infra=~\"$infra\", region=~\"$region\", host=~\"$host\", job=\"node\"} / on (infra, region, host) count by (infra, region, host) (node_cpu_seconds_total{infra=~\"$infra\", region=~\"$region\", host=~\"$host\", job=\"node\", mode=\"idle\"})",
+          "legendFormat": "{{host}} ({{region}})"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Root filesystem used",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "rpc-latency-prom"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 29
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max",
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "rpc-latency-prom"
+          },
+          "expr": "100 * (1 - node_filesystem_avail_bytes{infra=~\"$infra\", region=~\"$region\", host=~\"$host\", job=\"node\", mountpoint=\"/\"} / node_filesystem_size_bytes{infra=~\"$infra\", region=~\"$region\", host=~\"$host\", job=\"node\", mountpoint=\"/\"})",
+          "legendFormat": "{{host}} ({{region}})"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Network throughput",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "rpc-latency-prom"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 37
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bps"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max",
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "rpc-latency-prom"
+          },
+          "expr": "sum by (infra, region, host) (rate(node_network_receive_bytes_total{infra=~\"$infra\", region=~\"$region\", host=~\"$host\", job=\"node\"}[$__rate_interval])) * 8",
+          "legendFormat": "rx {{host}} ({{region}})"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "rpc-latency-prom"
+          },
+          "expr": "-sum by (infra, region, host) (rate(node_network_transmit_bytes_total{infra=~\"$infra\", region=~\"$region\", host=~\"$host\", job=\"node\"}[$__rate_interval])) * 8",
+          "legendFormat": "tx {{host}} ({{region}})"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "TCP connections (established)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "rpc-latency-prom"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 37
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max",
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "rpc-latency-prom"
+          },
+          "expr": "node_netstat_Tcp_CurrEstab{infra=~\"$infra\", region=~\"$region\", host=~\"$host\", job=\"node\"}",
+          "legendFormat": "{{host}} ({{region}})"
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "Disk I/O",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "rpc-latency-prom"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 45
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "Bps"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max",
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "rpc-latency-prom"
+          },
+          "expr": "sum by (infra, region, host) (rate(node_disk_read_bytes_total{infra=~\"$infra\", region=~\"$region\", host=~\"$host\", job=\"node\"}[$__rate_interval]))",
+          "legendFormat": "read {{host}} ({{region}})"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "rpc-latency-prom"
+          },
+          "expr": "-sum by (infra, region, host) (rate(node_disk_written_bytes_total{infra=~\"$infra\", region=~\"$region\", host=~\"$host\", job=\"node\"}[$__rate_interval]))",
+          "legendFormat": "write {{host}} ({{region}})"
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Swap used",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "rpc-latency-prom"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 45
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max",
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "rpc-latency-prom"
+          },
+          "expr": "node_memory_SwapTotal_bytes{infra=~\"$infra\", region=~\"$region\", host=~\"$host\", job=\"node\"} - node_memory_SwapFree_bytes{infra=~\"$infra\", region=~\"$region\", host=~\"$host\", job=\"node\"}",
+          "legendFormat": "{{host}} ({{region}})"
+        }
+      ]
+    }
+  ]
+}

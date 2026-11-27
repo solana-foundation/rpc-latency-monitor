@@ -1,0 +1,8 @@
+---
+# Monthly cost per host shown on the RPC Monitor Hosts board
+# (rpc_monitor_host_monthly_cost_usd). Public starting price for the plan until
+# replaced by the invoice figure; override per host in the inventory if boxes
+# differ, and set cost_source: invoice once the number is the billed one.
+monthly_cost_usd: 296
+server_plan: m4.metal.small
+cost_source: list-price

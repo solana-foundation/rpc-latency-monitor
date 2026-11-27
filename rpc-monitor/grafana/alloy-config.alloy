@@ -6,6 +6,64 @@ prometheus.scrape "rpc_latency_monitor" {
   forward_to      = [prometheus.remote_write.grafana_cloud.receiver]
 }
 
+// Host-level metrics (CPU, memory, disk, network, load) for every VM, so a
+// slow provider can be told apart from a starved vantage point. Same
+// collector set as the geyser-data fleet's node-exporter, served in-process by
+// Alloy so there is nothing extra to install. On bare metal Alloy runs on the
+// host and the default /proc, /sys and / paths apply; in the GCP/AWS
+// containers run-monitor.sh bind-mounts the host's trees and points these
+// paths at them.
+prometheus.exporter.unix "host" {
+  procfs_path = coalesce(sys.env("HOST_PROCFS"), "/proc")
+  sysfs_path  = coalesce(sys.env("HOST_SYSFS"), "/sys")
+  rootfs_path = coalesce(sys.env("HOST_ROOTFS"), "/")
+
+  set_collectors = [
+    "cpu",
+    "meminfo",
+    "diskstats",
+    "filesystem",
+    "loadavg",
+    "netdev",
+    "netstat",
+    "sockstat",
+    "textfile",
+  ]
+
+  // Static per-host facts written at provision time (ansible on metal,
+  // run-monitor.sh in the clouds): rpc_monitor_host_monthly_cost_usd{plan,source}.
+  textfile {
+    directory = coalesce(sys.env("HOST_TEXTFILE_DIR"), "/var/lib/rpc-latency-monitor/textfile")
+  }
+
+  filesystem {
+    fs_types_exclude     = "^(autofs|binfmt_misc|bpf|cgroup2?|configfs|debugfs|devpts|devtmpfs|fusectl|hugetlbfs|iso9660|mqueue|nsfs|overlay|proc|procfs|pstore|rpc_pipefs|securityfs|selinuxfs|squashfs|sysfs|tracefs|tmpfs)$"
+    mount_points_exclude = "^/(dev|proc|run/credentials/.+|sys|var/lib/docker/.+|var/lib/containers/storage/.+)($|/)"
+  }
+
+  netdev {
+    device_exclude = "^(lo|veth.*|docker.*|br-.*)$"
+  }
+}
+
+prometheus.scrape "host" {
+  targets         = prometheus.exporter.unix.host.targets
+  job_name        = "node"
+  scrape_interval = "60s"
+  forward_to      = [prometheus.relabel.host.receiver]
+}
+
+// Stamp host series with the same `region` the monitor uses, so the host
+// board can be filtered the way the latency board is.
+prometheus.relabel "host" {
+  forward_to = [prometheus.remote_write.grafana_cloud.receiver]
+
+  rule {
+    target_label = "region"
+    replacement  = coalesce(sys.env("MONITOR_REGION"), "unknown")
+  }
+}
+
 prometheus.remote_write "grafana_cloud" {
   // `host` keeps two boxes that share a region (e.g. a hand-made stand-in
   // beside the terraform one) from writing identical series, which makes

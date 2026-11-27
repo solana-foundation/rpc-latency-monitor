@@ -264,6 +264,26 @@ report the same `region` never collide into one series. The GCP deploy resets ex
 instances in terraform's `monitor_instances` output; anything else carrying the
 `service=rpc-latency-monitor` label is reported as a warning and left alone.
 
+### Accessing the VMs
+
+There is no shared bastion; each fleet is reached through its own provider. Bare-metal hosts run
+Ubuntu, with the monitor and Alloy running as systemd units under the `rpc-monitor` service user.
+GCP runs Container-Optimized OS and AWS runs Amazon Linux 2023; both run the monitor and Alloy
+as `rpc-monitor` / `alloy` Docker containers.
+
+| Infra | Where the hosts are listed | Console | Shell |
+|-------|----------------------------|---------|-------|
+| latitude | [`deploy/ansible/inventory/latitude.yml`](./deploy/ansible/inventory/latitude.yml) (IP per host) | [latitude.sh/dashboard](https://www.latitude.sh/dashboard) | `ssh ubuntu@<ansible_host>` |
+| tsw | [`deploy/ansible/inventory/teraswitch.yml`](./deploy/ansible/inventory/teraswitch.yml) (IP per host) | [teraswitch.com](https://teraswitch.com) → customer login | `ssh ubuntu@<ansible_host>` |
+| gcp | `terraform -chdir=deploy/gcp/terraform output monitor_instances` | [Compute Engine → VM instances](https://console.cloud.google.com/compute/instances) (filter `service=rpc-latency-monitor`) | `gcloud compute ssh <instance> --zone <zone> --project "$PROJECT"` |
+| aws | `terraform -chdir=deploy/aws/terraform output` | [EC2 → Instances](https://console.aws.amazon.com/ec2/home#Instances:) per region | `aws ssm start-session --target <instance-id> --region <region>` |
+
+Bare-metal SSH keys are the ones provisioned through each provider's console; the ansible
+playbooks (`deploy/ansible/*.yml`) use the same `ubuntu` user and are the preferred way to change
+anything on those hosts. Host health for every VM, on any infra, is on the **RPC Monitor Hosts**
+Grafana board (see [Dashboards](#dashboards)), so a shell is only needed to debug something the
+metrics cannot explain.
+
 The bare-metal hosts also run the Yellowstone gRPC streaming benchmark from
 [grpc-latency-monitor](https://github.com/solana-foundation/grpc-latency-monitor) as a
 `grpc-bench` systemd unit beside `rpc-monitor` (ansible role `grpc_bench`, pinned by
@@ -293,12 +313,27 @@ Dashboards live in [`grafana/`](./grafana). The primary board, **RPC Latency Mon
 A second board, **Sender** ([`grafana/sender-dashboard.json`](./grafana/sender-dashboard.json)),
 tracks provider economics for the trading program.
 
+A third board, **RPC Monitor Hosts** ([`grafana/host-dashboard.json`](./grafana/host-dashboard.json)),
+shows system-level metrics for every VM in the fleet — CPU, memory, load, root filesystem, network,
+TCP connections, disk I/O and swap — filterable by `infra`, `region` and `host`. The data comes from
+Alloy's built-in [`prometheus.exporter.unix`](https://grafana.com/docs/alloy/latest/reference/components/prometheus/prometheus.exporter.unix/)
+(the node-exporter collector set, scraped as `job="node"`), so a slow provider can be told apart
+from a starved vantage point. Its **Cost** row shows what each level of the fleet costs per month
+and year: fleet total, per infra (hosts, $/host, total, share) and per region, plus a $/month column
+per host. The figure is `rpc_monitor_host_monthly_cost_usd`, a static gauge written at provision
+time and read by Alloy's textfile collector: terraform's `monthly_cost_usd` map for GCP/AWS
+(`deploy/{gcp,aws}/terraform/variables.tf`) and the ansible group vars' `monthly_cost_usd` / `server_plan`
+for bare metal (`deploy/ansible/group_vars/{latitude,tsw}.yml`, overridable per host in the inventory). The committed values are public list prices
+(`source="list-price"`); set `cost_source: invoice` (ansible) or `-var cost_source=invoice`
+(terraform) when you replace them with billed amounts.
+Every `.json` in `grafana/` is pushed to Grafana Cloud by the `build-publish` workflow.
+
 The **public, filterable data view** is built natively on **solana.com/data** — it queries these same
 metrics server-side (read-only) and provides an on-brand UI with provider / region / method / time-range
 filters. The Grafana boards stay as the internal / full dashboards.
 
 Scrape and `remote_write` are configured in [`grafana/alloy-config.alloy`](./grafana/alloy-config.alloy)
-(15s scrape of `127.0.0.1:9464`, forwarding to Grafana Cloud via `GRAFANA_CLOUD_*` env vars).
+(60s scrape of `127.0.0.1:9464` plus the host exporter, forwarding to Grafana Cloud via `GRAFANA_CLOUD_*` env vars).
 
 ## Methodology
 

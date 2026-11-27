@@ -17,6 +17,9 @@ export IMAGE="${monitor_image}"
 export REGION="${monitor_region}"
 export DOPPLER_TOKEN="${doppler_token}"
 export INFRA=aws
+export MONTHLY_COST_USD="${monthly_cost_usd}"
+export COST_SOURCE="${cost_source}"
+export INSTANCE_PLAN="${instance_type}"
 export CONF_DIR=/var/lib/rpc-latency-monitor
 
 docker rm -f rpc-monitor alloy >/dev/null 2>&1 || true
