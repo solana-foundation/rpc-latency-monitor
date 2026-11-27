@@ -6,6 +6,10 @@ variable "instance_type" {
   type = string
 }
 
+variable "monthly_cost_usd" {
+  type = number
+}
+
 variable "instance_profile" {
   type = string
 }

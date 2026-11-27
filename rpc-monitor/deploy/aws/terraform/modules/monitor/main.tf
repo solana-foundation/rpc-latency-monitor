@@ -42,6 +42,8 @@ resource "aws_instance" "monitor" {
   user_data = "${templatefile("${path.module}/user-data.sh", {
     monitor_image      = var.monitor_image
     monitor_region     = var.region_label
+    monthly_cost_usd   = var.monthly_cost_usd
+    instance_type      = var.instance_type
     doppler_token      = var.doppler_token
     monitor_config_b64 = base64encode(var.monitor_config)
     alloy_config_b64   = base64encode(var.alloy_config)

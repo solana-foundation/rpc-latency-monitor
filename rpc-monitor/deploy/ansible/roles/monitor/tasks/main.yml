@@ -36,6 +36,27 @@
     mode: "0750"
   become: true
 
+- name: Textfile collector dir for Alloy's host exporter
+  ansible.builtin.file:
+    path: "{{ textfile_dir }}"
+    state: directory
+    owner: root
+    group: "{{ run_user }}"
+    mode: "0750"
+  become: true
+
+- name: Publish this host's monthly cost as a metric
+  ansible.builtin.copy:
+    dest: "{{ textfile_dir }}/host_cost.prom"
+    owner: root
+    group: "{{ run_user }}"
+    mode: "0640"
+    content: |
+      # HELP rpc_monitor_host_monthly_cost_usd Monthly cost of this host in USD (source=list-price until replaced by an invoice figure).
+      # TYPE rpc_monitor_host_monthly_cost_usd gauge
+      rpc_monitor_host_monthly_cost_usd{plan="{{ server_plan }}",source="{{ cost_source }}"} {{ monthly_cost_usd }}
+  become: true
+
 - name: Load BBR congestion control module now and on boot
   community.general.modprobe:
     name: tcp_bbr

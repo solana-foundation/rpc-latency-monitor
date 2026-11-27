@@ -13,9 +13,10 @@ locals {
 }
 
 module "us_east_1" {
-  source       = "./modules/monitor"
-  providers    = { aws = aws.us_east_1 }
-  region_label = "us-east-1"
+  source           = "./modules/monitor"
+  providers        = { aws = aws.us_east_1 }
+  region_label     = "us-east-1"
+  monthly_cost_usd = var.monthly_cost_usd["us-east-1"]
 
   instance_type    = local.common.instance_type
   instance_profile = local.common.instance_profile
@@ -26,9 +27,10 @@ module "us_east_1" {
 }
 
 module "us_west_1" {
-  source       = "./modules/monitor"
-  providers    = { aws = aws.us_west_1 }
-  region_label = "us-west-1"
+  source           = "./modules/monitor"
+  providers        = { aws = aws.us_west_1 }
+  region_label     = "us-west-1"
+  monthly_cost_usd = var.monthly_cost_usd["us-west-1"]
 
   instance_type    = local.common.instance_type
   instance_profile = local.common.instance_profile
@@ -39,9 +41,10 @@ module "us_west_1" {
 }
 
 module "eu_west_2" {
-  source       = "./modules/monitor"
-  providers    = { aws = aws.eu_west_2 }
-  region_label = "eu-west-2"
+  source           = "./modules/monitor"
+  providers        = { aws = aws.eu_west_2 }
+  region_label     = "eu-west-2"
+  monthly_cost_usd = var.monthly_cost_usd["eu-west-2"]
 
   instance_type    = local.common.instance_type
   instance_profile = local.common.instance_profile
@@ -52,9 +55,10 @@ module "eu_west_2" {
 }
 
 module "eu_central_1" {
-  source       = "./modules/monitor"
-  providers    = { aws = aws.eu_central_1 }
-  region_label = "eu-central-1"
+  source           = "./modules/monitor"
+  providers        = { aws = aws.eu_central_1 }
+  region_label     = "eu-central-1"
+  monthly_cost_usd = var.monthly_cost_usd["eu-central-1"]
 
   instance_type    = local.common.instance_type
   instance_profile = local.common.instance_profile
@@ -65,9 +69,10 @@ module "eu_central_1" {
 }
 
 module "eu_west_1" {
-  source       = "./modules/monitor"
-  providers    = { aws = aws.eu_west_1 }
-  region_label = "eu-west-1"
+  source           = "./modules/monitor"
+  providers        = { aws = aws.eu_west_1 }
+  region_label     = "eu-west-1"
+  monthly_cost_usd = var.monthly_cost_usd["eu-west-1"]
 
   instance_type    = local.common.instance_type
   instance_profile = local.common.instance_profile
@@ -78,9 +83,10 @@ module "eu_west_1" {
 }
 
 module "ap_northeast_1" {
-  source       = "./modules/monitor"
-  providers    = { aws = aws.ap_northeast_1 }
-  region_label = "ap-northeast-1"
+  source           = "./modules/monitor"
+  providers        = { aws = aws.ap_northeast_1 }
+  region_label     = "ap-northeast-1"
+  monthly_cost_usd = var.monthly_cost_usd["ap-northeast-1"]
 
   instance_type    = local.common.instance_type
   instance_profile = local.common.instance_profile
@@ -91,9 +97,10 @@ module "ap_northeast_1" {
 }
 
 module "ap_southeast_1" {
-  source       = "./modules/monitor"
-  providers    = { aws = aws.ap_southeast_1 }
-  region_label = "ap-southeast-1"
+  source           = "./modules/monitor"
+  providers        = { aws = aws.ap_southeast_1 }
+  region_label     = "ap-southeast-1"
+  monthly_cost_usd = var.monthly_cost_usd["ap-southeast-1"]
 
   instance_type    = local.common.instance_type
   instance_profile = local.common.instance_profile
